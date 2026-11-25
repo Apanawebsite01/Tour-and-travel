@@ -5,14 +5,14 @@
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "/api"
+      "destination": "/api/index"
     },
     {
       "source": "/uploads/(.*)",
-      "destination": "/api"
+      "destination": "/api/index"
     },
     {
-      "source": "/((?!api/|assets/|src/|uploads/|.*\\..*).*)",
+      "source": "/((?!api(?:/|$)|assets/|src/|uploads(?:/|$)|.*\\..*).*)",
       "destination": "/index.html"
     }
   ]
