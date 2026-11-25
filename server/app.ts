@@ -41,5 +41,12 @@ export function createApiApp(): express.Express {
   app.use('/api/public', publicRouter);
   app.use('/api/admin', adminRouter);
 
+  app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    console.error('Unhandled API error:', err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   return app;
 }

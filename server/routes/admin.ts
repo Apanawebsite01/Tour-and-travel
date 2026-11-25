@@ -23,7 +23,7 @@ import {
 } from '../../src/db/schema.ts';
 import { getUploadsDir } from '../paths.ts';
 import {
-  AuthenticatedRequest,
+  type AuthenticatedRequest,
   constantTimeEqualStr,
   getAdminProfile,
   getEnvAdminPassword,
