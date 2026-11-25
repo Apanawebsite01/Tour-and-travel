@@ -26,10 +26,23 @@ export function AdminLoginPage() {
 
   useEffect(() => {
     fetch('/api/admin/auth/status')
-      .then((r) => r.json())
-      .then((data) => {
-        setConfigured(Boolean(data.configured));
-        if (data.adminEmail) setEmail(data.adminEmail);
+      .then(async (r) => {
+        const ct = r.headers.get('content-type') || '';
+        if (!ct.includes('application/json')) return null;
+        const data = await r.json();
+        return { ok: r.ok, data };
+      })
+      .then((res) => {
+        if (!res) {
+          setLoadingStatus(false);
+          return;
+        }
+        if (!res.ok && res.data?.error) {
+          setError(res.data.error);
+        } else {
+          setConfigured(Boolean(res.data?.configured));
+          if (res.data?.adminEmail) setEmail(res.data.adminEmail);
+        }
         setLoadingStatus(false);
       })
       .catch(() => setLoadingStatus(false));
@@ -53,9 +66,10 @@ export function AdminLoginPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      const json = await res.json();
+      const ct = res.headers.get('content-type') || '';
+      const json = ct.includes('application/json') ? await res.json() : null;
       if (!res.ok) {
-        setError(json.error || 'Authentication failed');
+        setError(json?.error || `Authentication failed (HTTP ${res.status})`);
         setSubmitting(false);
         return;
       }

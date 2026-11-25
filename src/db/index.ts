@@ -6,9 +6,20 @@ declare global {
   var _postgresPool: Pool | undefined;
 }
 
+export function hasDatabaseConfig(): boolean {
+  return Boolean(
+    process.env.SQL_HOST ||
+      process.env.DATABASE_URL ||
+      process.env.POSTGRES_URL ||
+      process.env.SUPABASE_DB_URL
+  );
+}
+
 export const createPool = () => {
   if (!global._postgresPool) {
-    const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+    const connectionString =
+      process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.SUPABASE_DB_URL;
+
     if (process.env.SQL_HOST) {
       global._postgresPool = new Pool({
         host: process.env.SQL_HOST,
@@ -16,7 +27,7 @@ export const createPool = () => {
         password: process.env.SQL_PASSWORD,
         database: process.env.SQL_DB_NAME,
         max: 10,
-        connectionTimeoutMillis: 15000,
+        connectionTimeoutMillis: 5000,
       });
     } else if (connectionString) {
       const isLocal = connectionString.includes('localhost') || connectionString.includes('127.0.0.1');
@@ -24,7 +35,7 @@ export const createPool = () => {
         connectionString,
         ssl: isLocal ? undefined : { rejectUnauthorized: false },
         max: 10,
-        connectionTimeoutMillis: 15000,
+        connectionTimeoutMillis: 5000,
       });
     } else {
       global._postgresPool = new Pool({
@@ -33,7 +44,7 @@ export const createPool = () => {
         password: process.env.SQL_PASSWORD,
         database: process.env.SQL_DB_NAME,
         max: 10,
-        connectionTimeoutMillis: 15000,
+        connectionTimeoutMillis: 5000,
       });
     }
 
