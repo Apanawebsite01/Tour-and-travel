@@ -1,0 +1,277 @@
+---
+name: Vibrant Odyssey
+colors:
+  surface: '#f8f9ff'
+  surface-dim: '#cbdbf5'
+  surface-bright: '#f8f9ff'
+  surface-container-lowest: '#ffffff'
+  surface-container-low: '#eff4ff'
+  surface-container: '#e5eeff'
+  surface-container-high: '#dce9ff'
+  surface-container-highest: '#d3e4fe'
+  on-surface: '#0b1c30'
+  on-surface-variant: '#3e4947'
+  inverse-surface: '#213145'
+  inverse-on-surface: '#eaf1ff'
+  outline: '#6e7977'
+  outline-variant: '#bdc9c6'
+  surface-tint: '#006a63'
+  primary: '#005c55'
+  on-primary: '#ffffff'
+  primary-container: '#0f766e'
+  on-primary-container: '#a3faef'
+  inverse-primary: '#80d5cb'
+  secondary: '#9d4300'
+  on-secondary: '#ffffff'
+  secondary-container: '#fd761a'
+  on-secondary-container: '#5c2400'
+  tertiary: '#005e28'
+  on-tertiary: '#ffffff'
+  tertiary-container: '#007a35'
+  on-tertiary-container: '#a1ffaf'
+  error: '#ba1a1a'
+  on-error: '#ffffff'
+  error-container: '#ffdad6'
+  on-error-container: '#93000a'
+  primary-fixed: '#9cf2e8'
+  primary-fixed-dim: '#80d5cb'
+  on-primary-fixed: '#00201d'
+  on-primary-fixed-variant: '#00504a'
+  secondary-fixed: '#ffdbca'
+  secondary-fixed-dim: '#ffb690'
+  on-secondary-fixed: '#341100'
+  on-secondary-fixed-variant: '#783200'
+  tertiary-fixed: '#66ff8e'
+  tertiary-fixed-dim: '#3de273'
+  on-tertiary-fixed: '#002109'
+  on-tertiary-fixed-variant: '#005322'
+  background: '#f8f9ff'
+  on-background: '#0b1c30'
+  surface-variant: '#d3e4fe'
+typography:
+  display-lg:
+    fontFamily: Plus Jakarta Sans
+    fontSize: 48px
+    fontWeight: '700'
+    lineHeight: 56px
+    letterSpacing: -0.02em
+  display-lg-mobile:
+    fontFamily: Plus Jakarta Sans
+    fontSize: 32px
+    fontWeight: '700'
+    lineHeight: 40px
+    letterSpacing: -0.02em
+  headline-lg:
+    fontFamily: Plus Jakarta Sans
+    fontSize: 32px
+    fontWeight: '600'
+    lineHeight: 40px
+    letterSpacing: -0.01em
+  headline-lg-mobile:
+    fontFamily: Plus Jakarta Sans
+    fontSize: 24px
+    fontWeight: '600'
+    lineHeight: 32px
+    letterSpacing: -0.01em
+  headline-md:
+    fontFamily: Plus Jakarta Sans
+    fontSize: 24px
+    fontWeight: '600'
+    lineHeight: 32px
+  headline-sm:
+    fontFamily: Plus Jakarta Sans
+    fontSize: 20px
+    fontWeight: '600'
+    lineHeight: 28px
+  title-md:
+    fontFamily: Plus Jakarta Sans
+    fontSize: 18px
+    fontWeight: '600'
+    lineHeight: 24px
+  title-sm:
+    fontFamily: Plus Jakarta Sans
+    fontSize: 16px
+    fontWeight: '600'
+    lineHeight: 24px
+  body-lg:
+    fontFamily: Inter
+    fontSize: 18px
+    fontWeight: '400'
+    lineHeight: 28px
+  body-md:
+    fontFamily: Inter
+    fontSize: 16px
+    fontWeight: '400'
+    lineHeight: 24px
+  body-sm:
+    fontFamily: Inter
+    fontSize: 14px
+    fontWeight: '400'
+    lineHeight: 20px
+  label-md:
+    fontFamily: Inter
+    fontSize: 14px
+    fontWeight: '500'
+    lineHeight: 20px
+  label-sm:
+    fontFamily: Inter
+    fontSize: 12px
+    fontWeight: '500'
+    lineHeight: 16px
+  caption:
+    fontFamily: Inter
+    fontSize: 11px
+    fontWeight: '400'
+    lineHeight: 14px
+rounded:
+  sm: 0.25rem
+  DEFAULT: 0.5rem
+  md: 0.75rem
+  lg: 1rem
+  xl: 1.5rem
+  full: 9999px
+spacing:
+  gutter: 1.5rem
+  gutter-sm: 1rem
+  margin: 2rem
+  margin-sm: 1rem
+  space-xs: 0.25rem
+  space-sm: 0.5rem
+  space-md: 1rem
+  space-lg: 1.5rem
+  space-xl: 2.5rem
+---
+
+## Brand & Style
+
+This design system serves a modern Indian travel and mobility platform specializing in curated tours, bespoke holiday packages, and self-drive or chauffeured SUV/car rentals across India. 
+
+### Brand Personality & Emotional Intent
+- **Adventurous yet Reassuring:** Evokes the thrill of navigating high-altitude passes in Ladakh or coastal stretches in Goa, balanced with operational reliability and punctuality.
+- **Warm & Hospitable:** Reflects contemporary Indian hospitality—generous, welcoming, and deeply attentive to comfort.
+- **Trustworthy & Clear:** Eliminates booking anxiety through straightforward pricing in INR (₹), transparent specifications, and rapid communication channels.
+
+### Design Movement
+The interface blends **Modern Minimalism** with **Warm Tactile Nuances**:
+- Crisp, intentional layout architecture with expansive whitespace to allow high-vibrancy travel photography to breathe.
+- Pill-shaped call-to-actions, softened card contours, and low-contrast surface boundaries.
+- Ambient, diffused lighting models paired with clean line iconography to convey safety, polish, and seamless digital utility.
+
+## Colors
+
+The palette draws from the natural contrasts of the subcontinent: deep Himalayan pinewoods and coastal waters grounded against warm desert sunsets.
+
+### Primary Palette (Deep Teal)
+- **Primary Base (`#0F766E`):** Represents balance, security, and prestige. Applied to headers, key navigation anchors, active state highlights, and primary brand signifiers.
+- **Primary Dark (`#115E59`):** Reserved for hover states on primary actions, pressed states, and high-emphasis focal text over light containers.
+- **Primary Light Container (`#CCFBF1`):** Subdued surface fill for travel tags, selected search filter pills, and subtle badge backdrops.
+
+### Secondary Palette (Sunset Orange)
+- **Secondary Base (`#F97316`):** The primary conversion color. Applied strictly to direct action items such as "Book Now", "Check Availability", and price callouts.
+- **Secondary Dark (`#EA580C`):** Used for hover and pressed states on secondary conversion buttons.
+- **Secondary Soft (`#FFEDD5`):** Used as surface backing for promotional deals, discount callouts, and limited-time offer badges.
+
+### Tertiary & Status Accents
+- **WhatsApp Accent (`#25D366`):** Dedicated exclusively to immediate support interactions, direct booking queries, and the persistent floating concierge module.
+- **Success (`#16A34A`):** Instant confirmation states, booking verified status, and vehicle sanitization assurances.
+- **Warning (`#F59E0B`):** Limited seat/vehicle counters and seasonal weather/road advisories.
+- **Error (`#DC2626`):** Form validation alerts, payment cancellations, and unavailable date indicators.
+
+### Neutrals & Surfaces
+- **Canvas / Background (`#F8FAFC`):** Crisp off-white tone mitigating glare across bright displays.
+- **Surface / Card Background (`#FFFFFF`):** Pure white container surfaces providing lift from canvas.
+- **Text Heavy (`#0F172A`):** Deep slate providing high readability for headlines, trip summaries, and rental terms.
+- **Text Muted (`#64748B`):** Supporting metadata, fuel policies, luggage limits, and secondary timestamps.
+- **Border Slate (`#E2E8F0`):** Fine structural definition across table headers, input boundaries, and card perimeters.
+
+## Typography
+
+The type system pairs a geometric, high-clarity headline font with a neutral, utilitarian workhorse for content and data-dense itinerary layouts.
+
+### Font Hierarchy
+- **Headlines & Display:** Set in a rounded, geometric display face to establish welcoming, contemporary personality. Large headings maintain tight negative letter spacing to preserve compactness and optical balance against imagery.
+- **Body & Numerical Data:** Rendered in an unadorned grotesque family with high x-height, guaranteeing legibility across vehicle specification grids, policy footnotes, and currency notations (₹).
+
+### Currency & Numerical Handling
+- All currency figures use medium or semibold weights with standard letter spacing to prevent crowding between the Rupee glyph (`₹`) and numerical figures (e.g., `₹4,499 / day`).
+- Destination highlights, day-wise itineraries, and duration tags rely on standard body weights with uppercase or title-case micro-labels for scanning efficiency.
+
+## Layout & Spacing
+
+The layout model leverages a dynamic 12-column grid system bounded within a max-width container of `1280px` to maintain optimal viewing angles on wider monitors while keeping focal points disciplined.
+
+### Breakpoints & Layout Adaptations
+- **Desktop (1024px+):** 12-column grid. Hero sections pair multi-tab booking search bars overlaid directly on scenic photography. Sidebars handle active booking summaries and vehicle filters (Transmission, Fuel, Seating capacity). Gutters fixed at `1.5rem` (`24px`), outer canvas margin at `2rem` (`32px`).
+- **Tablet (768px – 1023px):** 8-column layout. Search modules stack horizontally into a clean 2x2 cluster. Itinerary listings reflow into dual-column cards. Gutters transition to `1rem` (`16px`).
+- **Mobile (< 768px):** 4-column fluid layout with an edge margin of `1rem` (`16px`). The central booking widget transforms into a structured step-by-step card. Critical callouts (like day rates and "Book Now") dock to a sticky bottom sheet.
+
+### Spacing Philosophy
+Consistent vertical progression ensures predictable grouping:
+- Content directly tied to a label uses `space-xs` (4px).
+- Icon-and-text associations use `space-sm` (8px).
+- Internal component card padding relies on `space-md` (16px) or `space-lg` (24px).
+- Section partitions, carousel separations, and content module boundaries use `space-xl` (40px) or higher.
+
+## Elevation & Depth
+
+Visual hierarchy uses softly diffused ambient shadows and crisp perimeter definitions, avoiding harsh artificial elevations.
+
+### Surface Elevation Levels
+- **Level 0 (Flat Canvas):** Used by default page canvas (`#F8FAFC`). No elevation or drop shadows.
+- **Level 1 (Card & Content Blocks):** Pure white surfaces (`#FFFFFF`) sitting on the canvas. Outlined with a fine `1px` border of Border Slate (`#E2E8F0`) paired with an extra-soft ambient drop shadow:
+  - `box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.05);`
+- **Level 2 (Interactive Overlays & Booking Engine):** Applied to the hero booking widget, active dropdown menus, and popovers:
+  - `box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.08), 0 8px 10px -6px rgba(15, 23, 42, 0.04);`
+- **Level 3 (Floating Elements & Concierge Actions):** Reserved for the floating WhatsApp button and sticky mobile checkout bars:
+  - `box-shadow: 0 20px 25px -5px rgba(15, 23, 42, 0.12), 0 10px 10px -5px rgba(15, 23, 42, 0.04);`
+
+### Border Accents
+Borders function as subtle edge crispeners rather than heavy containers. Cards always combine a thin boundary line (`#E2E8F0`) with a low-opacity shadow to preserve distinct shape boundaries against both bright photography and clean canvas surfaces.
+
+## Shapes
+
+The design system incorporates a dual-tier curve treatment: structural content containers use standard soft roundedness, while direct interaction elements embrace full pill geometry.
+
+### Radius Definitions
+- **Structural Cards & Content Containers:** 14px to 16px corner radius (`rounded-lg` scale). This creates an approachable, modern travel frame that softly cushions photography and multi-row itinerary lists.
+- **Buttons, Filter Chips, and Badges:** Fully pill-shaped (`9999px` radius). Emphasizes tap targets, reinforces friendliness, and distinctly separates dynamic interactive targets from background cards.
+- **Form Input Fields:** Standardized to 10px–12px radius, balancing the pill-shaped CTA above or beside them while maintaining clean baseline alignment across booking tables.
+
+## Components
+
+### 1. Booking Search Widget
+- **Tabs:** Dual-tab header switching between "Vehicle Rental" and "Tour Packages". Inactive tab sits flat on slate background; active tab renders with pure white fill, semibold text in Deep Teal, and an indicator line or soft shadow.
+- **Fields:** Split grid inputs covering Pickup City, Dates/Durations, and Vehicle Class (e.g., Hatchback, Sedan, 4x4 SUV). Focus state introduces a 2px stroke in Deep Teal with a faint teal halo ring.
+- **CTA:** Full-width or inline pill button in Sunset Orange (`#F97316`) reading "Search Cars" or "Explore Tours".
+
+### 2. Buttons
+- **Primary Action (Conversion):** Pill shape. Background Sunset Orange (`#F97316`), text pure white, font-weight 600. On hover: shifts to Dark Orange (`#EA580C`). Focus ring: 2px offset with 2px Sunset Orange.
+- **Secondary Action (Navigation / Details):** Pill shape. Deep Teal (`#0F766E`) background with white text, or pure white background with a 1.5px Deep Teal border and Deep Teal text.
+- **Floating WhatsApp Concierge:** Fixed pill/circular button positioned at `bottom: 24px; right: 24px; z-index: 50`. Background WhatsApp Green (`#25D366`), white icon and text label ("Chat with Expert"). Elevated with Level 3 shadow.
+
+### 3. Cards (Tours & Vehicles)
+- **Vehicle Rental Card:** 
+  - Top half: 16:9 aspect vehicle image showcasing realistic clean models (e.g., Scorpio-N, Thar 4x4, Innova Hycross).
+  - Badges positioned over top corners: Fuel type, Transmission, and "Zero Security Deposit" tag.
+  - Middle: Vehicle model headline, seat count, luggage capacity, and feature icons.
+  - Bottom strip: Daily starting rate in INR bolded (`₹3,200 / day`), accompanied by a pill CTA "Book Now".
+- **Tour Package Card:** 
+  - Destination hero image (e.g., Jaipur Fort, Ladakh Pass, Alleppey Backwaters).
+  - Floating duration tag (e.g., "5 Nights / 6 Days") on a frosted or solid white pill tag.
+  - Title, star rating with review counts, trip inclusion icons (Hotel, Sightseeing, Transfers).
+  - Total package cost highlighted in Sunset Orange.
+
+### 4. Chips & Filter Tags
+- Rendered in full pill radius.
+- **Default State:** Background `#FFFFFF`, border 1px `#E2E8F0`, text `#0F172A`.
+- **Selected State:** Background Light Teal (`#CCFBF1`), border 1px `#0F766E`, text `#0F766E`, semibold.
+
+### 5. Input Fields & Selectors
+- Height standard: 48px to accommodate comfortable mobile thumb tap targets.
+- Interior padding: 16px horizontal.
+- Accompanied by Lucide line icons anchored on the left (e.g., Calendar, MapPin, Clock, Users) rendered in `#64748B`.
+
+### 6. Badges & Status Indicators
+- **Instant Confirmation:** Pill container, `#DCFCE7` background, `#16A34A` text.
+- **Fast-Filling / Limited Slots:** Pill container, `#FEF3C7` background, `#B45309` text.
+- **All-India Permit:** Pill container, `#CCFBF1` background, `#0F766E` text.
