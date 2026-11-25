@@ -5,20 +5,30 @@ import { PublicLayout } from '../../components/layout/PublicLayout';
 import { useClientAuth } from '../../context/ClientAuthContext';
 
 function formatAuthError(err: unknown): string {
+  const code = typeof err === 'object' && err !== null && 'code' in err ? String((err as { code: unknown }).code) : '';
   const msg = err instanceof Error ? err.message : String(err);
-  if (msg.includes('auth/operation-not-allowed')) {
+  const combined = `${code} ${msg}`;
+
+  if (combined.includes('auth/unauthorized-domain')) {
+    const host = typeof window !== 'undefined' ? window.location.hostname : 'this domain';
+    return `Domain "${host}" is not authorized for Google Sign-In. Add it in Firebase Console → Authentication → Settings → Authorized domains.`;
+  }
+  if (combined.includes('auth/operation-not-allowed')) {
     return 'Email/Password sign-in is not yet enabled in Firebase Console → Authentication → Sign-in method.';
   }
-  if (msg.includes('auth/email-already-in-use')) {
+  if (combined.includes('auth/email-already-in-use')) {
     return 'An account with this email already exists. Please sign in instead.';
   }
-  if (msg.includes('auth/invalid-credential') || msg.includes('auth/wrong-password') || msg.includes('auth/user-not-found')) {
+  if (combined.includes('auth/invalid-credential') || combined.includes('auth/wrong-password') || combined.includes('auth/user-not-found')) {
     return 'Invalid email or password. Please check and try again.';
   }
-  if (msg.includes('auth/weak-password')) {
+  if (combined.includes('auth/weak-password')) {
     return 'Password should be at least 6 characters.';
   }
-  if (msg.includes('auth/popup-closed-by-user')) {
+  if (combined.includes('auth/popup-blocked')) {
+    return 'Sign-in pop-up was blocked by your browser. Please allow pop-ups for this site and try again.';
+  }
+  if (combined.includes('auth/popup-closed-by-user') || combined.includes('auth/cancelled-popup-request')) {
     return 'Google sign-in popup was closed before completing.';
   }
   return 'Authentication failed. Please verify your details and try again.';
