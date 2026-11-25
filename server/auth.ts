@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
-import type { Request, Response, NextFunction } from 'express';
-import { db } from './db.ts';
+import type { NextFunction, Request, Response } from 'express';
+import { eq } from 'drizzle-orm';
+import { db } from '../src/db/index.ts';
+import { profiles } from '../src/db/schema.ts';
 
 const EPHEMERAL_SECRET = crypto.randomBytes(32).toString('hex');
 
@@ -42,7 +44,7 @@ export interface AdminTokenPayload {
 export function signAdminToken(payload: Omit<AdminTokenPayload, 'exp'>): string {
   const fullPayload: AdminTokenPayload = {
     ...payload,
-    exp: Date.now() + 12 * 60 * 60 * 1000, // 12 hours
+    exp: Date.now() + 12 * 60 * 60 * 1000,
   };
   const encoded = Buffer.from(JSON.stringify(fullPayload)).toString('base64url');
   const sig = crypto.createHmac('sha256', getSessionSecret()).update(encoded).digest('base64url');
@@ -90,8 +92,22 @@ export function getEnvAdminPassword(): string {
   return (process.env.ADMIN_PASSWORD || '').trim();
 }
 
-export function getAdminProfile(): { id: string; full_name: string; email: string; role: string; password_hash: string | null } | undefined {
-  return db
-    .prepare("SELECT id, full_name, email, role, password_hash FROM profiles WHERE role = 'admin' LIMIT 1")
-    .get() as { id: string; full_name: string; email: string; role: string; password_hash: string | null } | undefined;
+export async function getAdminProfile() {
+  try {
+    const rows = await db
+      .select({
+        id: profiles.id,
+        full_name: profiles.full_name,
+        email: profiles.email,
+        role: profiles.role,
+        password_hash: profiles.password_hash,
+      })
+      .from(profiles)
+      .where(eq(profiles.role, 'admin'))
+      .limit(1);
+    return rows[0];
+  } catch (error) {
+    console.error('Failed to query admin profile:', error);
+    throw new Error('Unable to verify administrator profile.', { cause: error });
+  }
 }

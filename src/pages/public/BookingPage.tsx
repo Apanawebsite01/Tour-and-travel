@@ -154,9 +154,18 @@ export function BookingPage() {
 
     setSubmitting(true);
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (clientUser) {
+        try {
+          const idToken = await clientUser.getIdToken();
+          if (idToken) headers.Authorization = `Bearer ${idToken}`;
+        } catch {
+          // Proceed as guest if token refresh fails
+        }
+      }
       const res = await fetch('/api/public/bookings', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(parsed.data),
       });
       const json = await res.json();
@@ -172,23 +181,32 @@ export function BookingPage() {
     }
   };
 
+  const inputCls =
+    'w-full h-12 px-3.5 rounded-xl border border-slate-200 bg-slate-50/40 text-sm text-[#0F172A] focus:bg-white focus:outline-none focus:border-[#0F766E] focus:ring-2 focus:ring-[#0F766E]/15 transition-all';
+
   return (
     <PublicLayout>
-      <div className="max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <div className="max-w-2xl mb-8">
-          <p className="text-sm font-semibold text-[#0F766E] mb-2">Zero Prepayment Request</p>
-          <h1 className="font-display text-3xl font-bold text-[#0F172A] tracking-tight mb-2">
-            Request Your Vehicle or Tour Package
-          </h1>
-          <p className="text-[#475569] text-sm sm:text-base">
-            Submit your trip schedule below. Our team verifies availability, prepares an exact INR quote, and sends confirmation to your mobile.
-          </p>
+      <section className="bg-white border-b border-slate-200/80 py-10 lg:py-12">
+        <div className="max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="max-w-2xl">
+            <p className="text-xs font-semibold uppercase tracking-wider text-[#0F766E] mb-2">
+              Zero Prepayment Request
+            </p>
+            <h1 className="font-display text-3xl sm:text-4xl font-bold text-[#0F172A] tracking-tight mb-2 text-balance">
+              Request Your Vehicle or Tour Package
+            </h1>
+            <p className="text-[#475569] text-sm sm:text-base leading-relaxed">
+              Submit your trip schedule below. Our team verifies availability, prepares an exact INR quote, and sends confirmation to your mobile.
+            </p>
+          </div>
         </div>
+      </section>
 
+      <div className="max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-8 py-10 lg:py-12">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           <form
             onSubmit={handleSubmit}
-            className="lg:col-span-8 bg-white rounded-2xl border border-[#E2E8F0] p-6 sm:p-8 space-y-6 shadow-[0_4px_20px_-2px_rgba(15,23,42,0.05)]"
+            className="lg:col-span-8 bg-white rounded-2xl border border-slate-200/90 p-6 sm:p-8 space-y-7 shadow-[0_12px_36px_-12px_rgba(15,23,42,0.06)]"
           >
             {errorMsg && (
               <div className="flex items-start gap-2.5 p-4 rounded-xl bg-red-50 border border-red-200 text-sm text-red-700">
@@ -200,14 +218,14 @@ export function BookingPage() {
             {/* Step 1: Booking Type */}
             <div>
               <label className="block text-xs font-semibold text-[#475569] mb-2">What would you like to book?</label>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-2 p-1 rounded-xl bg-slate-100/90 border border-slate-200/60">
                 <button
                   type="button"
                   onClick={() => setBookingType('vehicle')}
-                  className={`flex items-center justify-center gap-2 py-3 px-4 rounded-xl border text-sm font-semibold transition-colors ${
+                  className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-sm font-semibold transition-all ${
                     bookingType === 'vehicle'
-                      ? 'bg-[#CCFBF1] border-[#0F766E] text-[#0F766E]'
-                      : 'border-[#E2E8F0] text-[#475569] hover:bg-slate-50'
+                      ? 'bg-white text-[#0F766E] shadow-sm'
+                      : 'text-[#64748B] hover:text-[#0F172A]'
                   }`}
                 >
                   <Car className="w-4 h-4" />
@@ -216,10 +234,10 @@ export function BookingPage() {
                 <button
                   type="button"
                   onClick={() => setBookingType('package')}
-                  className={`flex items-center justify-center gap-2 py-3 px-4 rounded-xl border text-sm font-semibold transition-colors ${
+                  className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-sm font-semibold transition-all ${
                     bookingType === 'package'
-                      ? 'bg-[#CCFBF1] border-[#0F766E] text-[#0F766E]'
-                      : 'border-[#E2E8F0] text-[#475569] hover:bg-slate-50'
+                      ? 'bg-white text-[#0F766E] shadow-sm'
+                      : 'text-[#64748B] hover:text-[#0F172A]'
                   }`}
                 >
                   <Compass className="w-4 h-4" />
@@ -233,11 +251,7 @@ export function BookingPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-[#475569] mb-1.5">Select Vehicle</label>
-                  <select
-                    value={vehicleId}
-                    onChange={(e) => setVehicleId(e.target.value)}
-                    className="w-full h-12 px-3.5 rounded-xl border border-[#E2E8F0] text-sm bg-white focus:outline-none focus:border-[#0F766E]"
-                  >
+                  <select value={vehicleId} onChange={(e) => setVehicleId(e.target.value)} className={inputCls}>
                     {vehicles.map((v) => (
                       <option key={v.id} value={v.id}>
                         {v.name} ({formatINR(v.daily_rate)}/day · {v.seats} Seats)
@@ -251,7 +265,7 @@ export function BookingPage() {
                   <select
                     value={driverPref}
                     onChange={(e) => setDriverPref(e.target.value as 'With Driver' | 'Self-Drive')}
-                    className="w-full h-12 px-3.5 rounded-xl border border-[#E2E8F0] text-sm bg-white focus:outline-none focus:border-[#0F766E]"
+                    className={inputCls}
                   >
                     {(!selectedVehicle || selectedVehicle.driver_available) && (
                       <option value="With Driver">With Verified Chauffeur</option>
@@ -265,11 +279,7 @@ export function BookingPage() {
             ) : (
               <div>
                 <label className="block text-xs font-semibold text-[#475569] mb-1.5">Select Tour Package</label>
-                <select
-                  value={packageId}
-                  onChange={(e) => setPackageId(e.target.value)}
-                  className="w-full h-12 px-3.5 rounded-xl border border-[#E2E8F0] text-sm bg-white focus:outline-none focus:border-[#0F766E]"
-                >
+                <select value={packageId} onChange={(e) => setPackageId(e.target.value)} className={inputCls}>
                   {packages.map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.name} ({p.days}D/{p.nights}N · {formatINR(p.price)}/person)
@@ -280,7 +290,7 @@ export function BookingPage() {
             )}
 
             {/* Step 3: Route & Schedule */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-[#E2E8F0]">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-5 border-t border-slate-100">
               <div>
                 <label className="block text-xs font-semibold text-[#475569] mb-1.5">Pickup Location *</label>
                 <input
@@ -289,7 +299,7 @@ export function BookingPage() {
                   value={pickupLocation}
                   onChange={(e) => setPickupLocation(e.target.value)}
                   placeholder="Airport, Railway Station, or Address"
-                  className="w-full h-12 px-3.5 rounded-xl border border-[#E2E8F0] text-sm focus:outline-none focus:border-[#0F766E]"
+                  className={inputCls}
                 />
                 {fieldErrors.pickup_location && (
                   <p className="text-xs text-red-600 mt-1">{fieldErrors.pickup_location}</p>
@@ -304,7 +314,7 @@ export function BookingPage() {
                   value={destination}
                   onChange={(e) => setDestination(e.target.value)}
                   placeholder="e.g., Jaipur · Udaipur"
-                  className="w-full h-12 px-3.5 rounded-xl border border-[#E2E8F0] text-sm focus:outline-none focus:border-[#0F766E]"
+                  className={inputCls}
                 />
                 {fieldErrors.destination && <p className="text-xs text-red-600 mt-1">{fieldErrors.destination}</p>}
               </div>
@@ -316,7 +326,7 @@ export function BookingPage() {
                   required
                   value={travelDate}
                   onChange={(e) => setTravelDate(e.target.value)}
-                  className="w-full h-12 px-3.5 rounded-xl border border-[#E2E8F0] text-sm tabular-nums focus:outline-none focus:border-[#0F766E]"
+                  className={`${inputCls} tabular-nums`}
                 />
               </div>
 
@@ -328,7 +338,7 @@ export function BookingPage() {
                   min={travelDate}
                   value={returnDate}
                   onChange={(e) => setReturnDate(e.target.value)}
-                  className="w-full h-12 px-3.5 rounded-xl border border-[#E2E8F0] text-sm tabular-nums focus:outline-none focus:border-[#0F766E]"
+                  className={`${inputCls} tabular-nums`}
                 />
                 {fieldErrors.return_date && <p className="text-xs text-red-600 mt-1">{fieldErrors.return_date}</p>}
               </div>
@@ -339,7 +349,7 @@ export function BookingPage() {
                   type="time"
                   value={pickupTime}
                   onChange={(e) => setPickupTime(e.target.value)}
-                  className="w-full h-12 px-3.5 rounded-xl border border-[#E2E8F0] text-sm tabular-nums focus:outline-none focus:border-[#0F766E]"
+                  className={`${inputCls} tabular-nums`}
                 />
               </div>
 
@@ -351,13 +361,13 @@ export function BookingPage() {
                   max={30}
                   value={passengers}
                   onChange={(e) => setPassengers(Number(e.target.value))}
-                  className="w-full h-12 px-3.5 rounded-xl border border-[#E2E8F0] text-sm tabular-nums focus:outline-none focus:border-[#0F766E]"
+                  className={`${inputCls} tabular-nums`}
                 />
               </div>
             </div>
 
             {/* Step 4: Traveller Contact */}
-            <div className="pt-2 border-t border-[#E2E8F0] space-y-4">
+            <div className="pt-5 border-t border-slate-100 space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                 <span className="font-semibold text-[#0F172A]">Traveller Contact Details</span>
                 {clientUser ? (
@@ -372,41 +382,41 @@ export function BookingPage() {
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
-                <label className="block text-xs font-semibold text-[#475569] mb-1.5">Full Name *</label>
-                <input
-                  type="text"
-                  required
-                  value={customerName}
-                  onChange={(e) => setCustomerName(e.target.value)}
-                  placeholder="Aarav Sharma"
-                  className="w-full h-12 px-3.5 rounded-xl border border-[#E2E8F0] text-sm focus:outline-none focus:border-[#0F766E]"
-                />
-                {fieldErrors.customer_name && <p className="text-xs text-red-600 mt-1">{fieldErrors.customer_name}</p>}
-              </div>
+                  <label className="block text-xs font-semibold text-[#475569] mb-1.5">Full Name *</label>
+                  <input
+                    type="text"
+                    required
+                    value={customerName}
+                    onChange={(e) => setCustomerName(e.target.value)}
+                    placeholder="Aarav Sharma"
+                    className={inputCls}
+                  />
+                  {fieldErrors.customer_name && <p className="text-xs text-red-600 mt-1">{fieldErrors.customer_name}</p>}
+                </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-[#475569] mb-1.5">Mobile / WhatsApp *</label>
-                <input
-                  type="tel"
-                  required
-                  value={mobile}
-                  onChange={(e) => setMobile(e.target.value)}
-                  placeholder="+91 98114 20750"
-                  className="w-full h-12 px-3.5 rounded-xl border border-[#E2E8F0] text-sm tabular-nums focus:outline-none focus:border-[#0F766E]"
-                />
-                {fieldErrors.mobile && <p className="text-xs text-red-600 mt-1">{fieldErrors.mobile}</p>}
-              </div>
+                <div>
+                  <label className="block text-xs font-semibold text-[#475569] mb-1.5">Mobile / WhatsApp *</label>
+                  <input
+                    type="tel"
+                    required
+                    value={mobile}
+                    onChange={(e) => setMobile(e.target.value)}
+                    placeholder="+91 98114 20750"
+                    className={`${inputCls} tabular-nums`}
+                  />
+                  {fieldErrors.mobile && <p className="text-xs text-red-600 mt-1">{fieldErrors.mobile}</p>}
+                </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-[#475569] mb-1.5">Email (Optional)</label>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="name@example.com"
-                  className="w-full h-12 px-3.5 rounded-xl border border-[#E2E8F0] text-sm focus:outline-none focus:border-[#0F766E]"
-                />
-              </div>
+                <div>
+                  <label className="block text-xs font-semibold text-[#475569] mb-1.5">Email (Optional)</label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="name@example.com"
+                    className={inputCls}
+                  />
+                </div>
               </div>
             </div>
 
@@ -417,43 +427,45 @@ export function BookingPage() {
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder="Child seat, luggage carrier, airport placard name, or hotel stops..."
-                className="w-full p-3.5 rounded-xl border border-[#E2E8F0] text-sm focus:outline-none focus:border-[#0F766E]"
+                className="w-full p-3.5 rounded-xl border border-slate-200 bg-slate-50/40 text-sm text-[#0F172A] focus:bg-white focus:outline-none focus:border-[#0F766E] focus:ring-2 focus:ring-[#0F766E]/15 transition-all"
               />
             </div>
 
             <button
               type="submit"
               disabled={submitting}
-              className="w-full rounded-full bg-[#F97316] hover:bg-[#EA580C] disabled:opacity-60 text-white font-semibold text-base py-4 transition-colors"
+              className="w-full rounded-full bg-[#F97316] hover:bg-[#EA580C] active:scale-[0.99] disabled:opacity-60 text-white font-semibold text-base py-4 shadow-[0_6px_18px_-4px_rgba(249,115,22,0.45)] transition-all"
             >
               {submitting ? 'Submitting Booking Request...' : 'Submit Booking Request'}
             </button>
           </form>
 
           {/* Summary Sidebar */}
-          <aside className="lg:col-span-4 bg-white rounded-2xl border border-[#E2E8F0] p-6 space-y-5 lg:sticky lg:top-24">
-            <h2 className="font-display text-lg font-bold text-[#0F172A]">Trip Estimate Summary</h2>
-            <div className="space-y-3 text-sm border-b border-[#E2E8F0] pb-4">
+          <aside className="lg:col-span-4 bg-white rounded-2xl border border-slate-200/90 p-6 sm:p-7 space-y-5 lg:sticky lg:top-24 shadow-[0_12px_36px_-12px_rgba(15,23,42,0.06)]">
+            <h2 className="font-display text-lg font-bold text-[#0F172A] tracking-tight">Trip Estimate Summary</h2>
+            <div className="space-y-3 text-sm border-b border-slate-100 pb-4">
               <div className="flex justify-between">
                 <span className="text-[#64748B]">Booking Type</span>
-                <span className="font-semibold capitalize">{bookingType === 'vehicle' ? 'Vehicle Rental' : 'Tour Package'}</span>
+                <span className="font-semibold text-[#0F172A]">
+                  {bookingType === 'vehicle' ? 'Vehicle Rental' : 'Tour Package'}
+                </span>
               </div>
               <div className="flex justify-between gap-3">
                 <span className="text-[#64748B]">Selection</span>
-                <span className="font-semibold text-right">
+                <span className="font-semibold text-right text-[#0F172A]">
                   {bookingType === 'vehicle' ? selectedVehicle?.name || '—' : selectedPackage?.name || '—'}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-[#64748B]">Duration</span>
-                <span className="font-semibold tabular-nums flex items-center gap-1">
+                <span className="font-semibold tabular-nums flex items-center gap-1.5 text-[#0F172A]">
                   <Calendar className="w-3.5 h-3.5 text-[#0F766E]" />
                   {tripDays} {tripDays === 1 ? 'Day' : 'Days'}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-[#64748B]">Guests</span>
-                <span className="font-semibold tabular-nums">{passengers}</span>
+                <span className="font-semibold tabular-nums text-[#0F172A]">{passengers}</span>
               </div>
             </div>
 
@@ -462,7 +474,7 @@ export function BookingPage() {
               <span className="text-2xl font-bold text-[#F97316] tabular-nums">{formatINR(indicativeTotal)}</span>
             </div>
 
-            <div className="rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] p-4 text-xs text-[#475569] space-y-2">
+            <div className="rounded-xl bg-[#F7F8FA] border border-slate-200/80 p-4 text-xs text-[#475569] space-y-2 leading-relaxed">
               <div className="flex items-center gap-2 font-semibold text-[#0F766E]">
                 <ShieldCheck className="w-4 h-4" />
                 <span>What happens next?</span>

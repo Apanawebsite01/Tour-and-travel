@@ -7,6 +7,7 @@
 
   --color-teal-primary: #0F766E;
   --color-teal-dark: #115E59;
+  --color-teal-deep: #0B3B36;
   --color-teal-soft: #CCFBF1;
   --color-orange-primary: #F97316;
   --color-orange-dark: #EA580C;
@@ -15,19 +16,52 @@
 }
 
 @layer base {
+  html {
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
   body {
     font-family: var(--font-sans);
-    background-color: #F8FAFC;
+    background-color: #F7F8FA;
     color: #0F172A;
+    text-rendering: optimizeLegibility;
   }
 
   h1, h2, h3, h4, .font-display {
     font-family: var(--font-display);
   }
+
+  button:not(:disabled),
+  a[href] {
+    cursor: pointer;
+  }
 }
 
 .tabular-nums {
   font-variant-numeric: tabular-nums;
+}
+
+.text-balance {
+  text-wrap: balance;
+}
+
+.ease-snappy {
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 @media print {

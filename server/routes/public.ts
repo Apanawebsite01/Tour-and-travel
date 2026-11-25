@@ -1,33 +1,59 @@
 import { Router } from 'express';
 import crypto from 'node:crypto';
+import { and, asc, desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { db } from '../db.ts';
+import { db } from '../../src/db/index.ts';
+import {
+  bookings,
+  bookingStatusHistory,
+  customers,
+  faqs,
+  gallery,
+  reviews,
+  siteSettings,
+  tourPackages,
+  vehicleImages,
+  vehicles,
+} from '../../src/db/schema.ts';
+import { adminAuth } from '../../src/lib/firebase-admin.ts';
+import { getOrCreateUser } from '../../src/db/users.ts';
+import { requireAuth, type FirebaseAuthRequest } from '../../src/middleware/auth.ts';
 
 export const publicRouter = Router();
 
-function safeJsonParse<T>(raw: string | null | undefined, fallback: T): T {
-  if (!raw) return fallback;
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
-}
+const STRING_SETTING_KEYS = new Set([
+  'business_name',
+  'tagline',
+  'hero_headline',
+  'hero_subheadline',
+  'hero_image',
+  'phone',
+  'whatsapp_number',
+  'email',
+  'address',
+  'operating_area',
+  'about_title',
+  'about_description',
+]);
 
-function getSiteSettingsMap(): Record<string, unknown> {
-  const rows = db.prepare('SELECT key, value FROM site_settings').all() as { key: string; value: string }[];
+async function getSiteSettingsMap(): Promise<Record<string, unknown>> {
+  const rows = await db.select().from(siteSettings);
   const out: Record<string, unknown> = {};
   for (const r of rows) {
-    out[r.key] = safeJsonParse(r.value, r.value);
+    out[r.key] = STRING_SETTING_KEYS.has(r.key) && r.value !== null && r.value !== undefined ? String(r.value) : r.value;
   }
   return out;
 }
 
-function getVehicleImagesMap(): Map<string, string[]> {
-  const imgs = db.prepare('SELECT vehicle_id, image_url FROM vehicle_images ORDER BY sort_order ASC').all() as {
-    vehicle_id: string;
-    image_url: string;
-  }[];
+async function getVehicleImagesMap(): Promise<Map<string, string[]>> {
+  const imgs = await db
+    .select({
+      vehicle_id: vehicleImages.vehicle_id,
+      image_url: vehicleImages.image_url,
+    })
+    .from(vehicleImages)
+    .orderBy(asc(vehicleImages.sort_order));
+
   const map = new Map<string, string[]>();
   for (const row of imgs) {
     const arr = map.get(row.vehicle_id) || [];
@@ -38,7 +64,28 @@ function getVehicleImagesMap(): Map<string, string[]> {
 }
 
 // Public vehicle projection (explicitly excludes registration_no)
-function formatPublicVehicle(row: Record<string, unknown>, images: string[]) {
+function formatPublicVehicle(
+  row: {
+    id: string;
+    name: string;
+    brand: string;
+    model: string;
+    seats: number;
+    luggage_capacity: number;
+    is_ac: boolean;
+    fuel_type: string;
+    transmission: string;
+    price_per_km: number;
+    daily_rate: number;
+    min_km_per_day: number;
+    driver_allowance: number;
+    driver_available: boolean;
+    self_drive_available: boolean;
+    status: string;
+    description: string;
+  },
+  images: string[]
+) {
   return {
     id: row.id,
     name: row.name,
@@ -61,141 +108,241 @@ function formatPublicVehicle(row: Record<string, unknown>, images: string[]) {
   };
 }
 
-function formatPublicPackage(row: Record<string, unknown>) {
-  return {
-    id: row.id,
-    name: row.name,
-    destination: row.destination,
-    days: row.days,
-    nights: row.nights,
-    price: row.price,
-    pickup_location: row.pickup_location,
-    dropoff_location: row.dropoff_location,
-    itinerary: safeJsonParse(row.itinerary as string, []),
-    inclusions: safeJsonParse(row.inclusions as string, []),
-    exclusions: safeJsonParse(row.exclusions as string, []),
-    suggested_vehicle_id: row.suggested_vehicle_id,
-    max_passengers: row.max_passengers,
-    status: row.status,
-    images: safeJsonParse(row.images as string, []),
-    rating: row.rating,
-    review_count: row.review_count,
-  };
-}
-
 // GET /api/public/bootstrap — all safe live website data
-publicRouter.get('/bootstrap', (_req, res) => {
-  const settings = getSiteSettingsMap();
-  const imgMap = getVehicleImagesMap();
+publicRouter.get('/bootstrap', async (_req, res) => {
+  try {
+    const [settings, imgMap, vehRows, pkgRows, reviewRows, galleryRows, faqRows] = await Promise.all([
+      getSiteSettingsMap(),
+      getVehicleImagesMap(),
+      db
+        .select({
+          id: vehicles.id,
+          name: vehicles.name,
+          brand: vehicles.brand,
+          model: vehicles.model,
+          seats: vehicles.seats,
+          luggage_capacity: vehicles.luggage_capacity,
+          is_ac: vehicles.is_ac,
+          fuel_type: vehicles.fuel_type,
+          transmission: vehicles.transmission,
+          price_per_km: vehicles.price_per_km,
+          daily_rate: vehicles.daily_rate,
+          min_km_per_day: vehicles.min_km_per_day,
+          driver_allowance: vehicles.driver_allowance,
+          driver_available: vehicles.driver_available,
+          self_drive_available: vehicles.self_drive_available,
+          status: vehicles.status,
+          description: vehicles.description,
+        })
+        .from(vehicles)
+        .where(and(eq(vehicles.is_archived, false), eq(vehicles.is_published, true)))
+        .orderBy(asc(vehicles.created_at)),
+      db
+        .select()
+        .from(tourPackages)
+        .where(eq(tourPackages.status, 'Published'))
+        .orderBy(asc(tourPackages.created_at)),
+      db
+        .select({
+          id: reviews.id,
+          customer_name: reviews.customer_name,
+          location: reviews.location,
+          trip_type: reviews.trip_type,
+          rating: reviews.rating,
+          comment: reviews.comment,
+          is_approved: reviews.is_approved,
+          created_at: reviews.created_at,
+        })
+        .from(reviews)
+        .where(eq(reviews.is_approved, true))
+        .orderBy(desc(reviews.created_at)),
+      db
+        .select({
+          id: gallery.id,
+          image_url: gallery.image_url,
+          caption: gallery.caption,
+          location: gallery.location,
+          sort_order: gallery.sort_order,
+        })
+        .from(gallery)
+        .orderBy(asc(gallery.sort_order), desc(gallery.created_at)),
+      db
+        .select({
+          id: faqs.id,
+          question: faqs.question,
+          answer: faqs.answer,
+          sort_order: faqs.sort_order,
+        })
+        .from(faqs)
+        .where(eq(faqs.is_active, true))
+        .orderBy(asc(faqs.sort_order)),
+    ]);
 
-  const vehicles = (
-    db
-      .prepare(
-        `SELECT id, name, brand, model, seats, luggage_capacity, is_ac, fuel_type, transmission,
-                price_per_km, daily_rate, min_km_per_day, driver_allowance, driver_available,
-                self_drive_available, status, description
-         FROM vehicles
-         WHERE is_archived = 0 AND is_published = 1
-         ORDER BY created_at ASC`
-      )
-      .all() as Record<string, unknown>[]
-  ).map((v) => formatPublicVehicle(v, imgMap.get(v.id as string) || []));
-
-  const packages = (
-    db
-      .prepare("SELECT * FROM tour_packages WHERE status = 'Published' ORDER BY created_at ASC")
-      .all() as Record<string, unknown>[]
-  ).map(formatPublicPackage);
-
-  const reviews = db
-    .prepare('SELECT id, customer_name, location, trip_type, rating, comment, created_at FROM reviews WHERE is_approved = 1 ORDER BY created_at DESC')
-    .all();
-
-  const gallery = db
-    .prepare('SELECT id, image_url, caption, location, sort_order FROM gallery ORDER BY sort_order ASC, created_at DESC')
-    .all();
-
-  const faqs = db
-    .prepare('SELECT id, question, answer, sort_order FROM faqs WHERE is_active = 1 ORDER BY sort_order ASC')
-    .all();
-
-  res.json({ settings, vehicles, packages, reviews, gallery, faqs });
-});
-
-publicRouter.get('/vehicles', (_req, res) => {
-  const imgMap = getVehicleImagesMap();
-  const rows = db
-    .prepare(
-      `SELECT id, name, brand, model, seats, luggage_capacity, is_ac, fuel_type, transmission,
-              price_per_km, daily_rate, min_km_per_day, driver_allowance, driver_available,
-              self_drive_available, status, description
-       FROM vehicles
-       WHERE is_archived = 0 AND is_published = 1
-       ORDER BY created_at ASC`
-    )
-    .all() as Record<string, unknown>[];
-  res.json(rows.map((v) => formatPublicVehicle(v, imgMap.get(v.id as string) || [])));
-});
-
-publicRouter.get('/vehicles/:id', (req, res) => {
-  const row = db
-    .prepare(
-      `SELECT id, name, brand, model, seats, luggage_capacity, is_ac, fuel_type, transmission,
-              price_per_km, daily_rate, min_km_per_day, driver_allowance, driver_available,
-              self_drive_available, status, description
-       FROM vehicles
-       WHERE id = ? AND is_archived = 0 AND is_published = 1`
-    )
-    .get(req.params.id) as Record<string, unknown> | undefined;
-
-  if (!row) {
-    res.status(404).json({ error: 'Vehicle not found' });
-    return;
+    const formattedVehicles = vehRows.map((v) => formatPublicVehicle(v, imgMap.get(v.id) || []));
+    res.json({
+      settings,
+      vehicles: formattedVehicles,
+      packages: pkgRows,
+      reviews: reviewRows,
+      gallery: galleryRows,
+      faqs: faqRows,
+    });
+  } catch (error) {
+    console.error('Bootstrap query failed:', error);
+    res.status(500).json({ error: 'Unable to load catalog data. Please try again.' });
   }
-  const imgs = (
-    db.prepare('SELECT image_url FROM vehicle_images WHERE vehicle_id = ? ORDER BY sort_order ASC').all(req.params.id) as {
-      image_url: string;
-    }[]
-  ).map((i) => i.image_url);
-  res.json(formatPublicVehicle(row, imgs));
 });
 
-publicRouter.get('/packages', (_req, res) => {
-  const rows = db
-    .prepare("SELECT * FROM tour_packages WHERE status = 'Published' ORDER BY created_at ASC")
-    .all() as Record<string, unknown>[];
-  res.json(rows.map(formatPublicPackage));
-});
-
-publicRouter.get('/packages/:id', (req, res) => {
-  const row = db
-    .prepare("SELECT * FROM tour_packages WHERE id = ? AND status = 'Published'")
-    .get(req.params.id) as Record<string, unknown> | undefined;
-  if (!row) {
-    res.status(404).json({ error: 'Package not found' });
-    return;
+publicRouter.get('/vehicles', async (_req, res) => {
+  try {
+    const [imgMap, rows] = await Promise.all([
+      getVehicleImagesMap(),
+      db
+        .select({
+          id: vehicles.id,
+          name: vehicles.name,
+          brand: vehicles.brand,
+          model: vehicles.model,
+          seats: vehicles.seats,
+          luggage_capacity: vehicles.luggage_capacity,
+          is_ac: vehicles.is_ac,
+          fuel_type: vehicles.fuel_type,
+          transmission: vehicles.transmission,
+          price_per_km: vehicles.price_per_km,
+          daily_rate: vehicles.daily_rate,
+          min_km_per_day: vehicles.min_km_per_day,
+          driver_allowance: vehicles.driver_allowance,
+          driver_available: vehicles.driver_available,
+          self_drive_available: vehicles.self_drive_available,
+          status: vehicles.status,
+          description: vehicles.description,
+        })
+        .from(vehicles)
+        .where(and(eq(vehicles.is_archived, false), eq(vehicles.is_published, true)))
+        .orderBy(asc(vehicles.created_at)),
+    ]);
+    res.json(rows.map((v) => formatPublicVehicle(v, imgMap.get(v.id) || [])));
+  } catch (error) {
+    console.error('Vehicles query failed:', error);
+    res.status(500).json({ error: 'Unable to load vehicles.' });
   }
-  const pkg = formatPublicPackage(row);
-  let suggestedVehicle = null;
-  if (pkg.suggested_vehicle_id) {
-    const v = db
-      .prepare(
-        `SELECT id, name, brand, model, seats, luggage_capacity, is_ac, fuel_type, transmission,
-                price_per_km, daily_rate, min_km_per_day, driver_allowance, driver_available,
-                self_drive_available, status, description
-         FROM vehicles WHERE id = ? AND is_archived = 0 AND is_published = 1`
-      )
-      .get(pkg.suggested_vehicle_id as string) as Record<string, unknown> | undefined;
-    if (v) {
-      const imgs = (
-        db.prepare('SELECT image_url FROM vehicle_images WHERE vehicle_id = ? ORDER BY sort_order ASC').all(v.id as string) as {
-          image_url: string;
-        }[]
-      ).map((i) => i.image_url);
-      suggestedVehicle = formatPublicVehicle(v, imgs);
+});
+
+publicRouter.get('/vehicles/:id', async (req, res) => {
+  try {
+    const rows = await db
+      .select({
+        id: vehicles.id,
+        name: vehicles.name,
+        brand: vehicles.brand,
+        model: vehicles.model,
+        seats: vehicles.seats,
+        luggage_capacity: vehicles.luggage_capacity,
+        is_ac: vehicles.is_ac,
+        fuel_type: vehicles.fuel_type,
+        transmission: vehicles.transmission,
+        price_per_km: vehicles.price_per_km,
+        daily_rate: vehicles.daily_rate,
+        min_km_per_day: vehicles.min_km_per_day,
+        driver_allowance: vehicles.driver_allowance,
+        driver_available: vehicles.driver_available,
+        self_drive_available: vehicles.self_drive_available,
+        status: vehicles.status,
+        description: vehicles.description,
+      })
+      .from(vehicles)
+      .where(and(eq(vehicles.id, req.params.id), eq(vehicles.is_archived, false), eq(vehicles.is_published, true)))
+      .limit(1);
+
+    const row = rows[0];
+    if (!row) {
+      res.status(404).json({ error: 'Vehicle not found' });
+      return;
     }
+
+    const imgs = await db
+      .select({ image_url: vehicleImages.image_url })
+      .from(vehicleImages)
+      .where(eq(vehicleImages.vehicle_id, req.params.id))
+      .orderBy(asc(vehicleImages.sort_order));
+
+    res.json(formatPublicVehicle(row, imgs.map((i) => i.image_url)));
+  } catch (error) {
+    console.error('Vehicle detail query failed:', error);
+    res.status(500).json({ error: 'Unable to load vehicle details.' });
   }
-  res.json({ ...pkg, suggested_vehicle: suggestedVehicle });
+});
+
+publicRouter.get('/packages', async (_req, res) => {
+  try {
+    const rows = await db
+      .select()
+      .from(tourPackages)
+      .where(eq(tourPackages.status, 'Published'))
+      .orderBy(asc(tourPackages.created_at));
+    res.json(rows);
+  } catch (error) {
+    console.error('Packages query failed:', error);
+    res.status(500).json({ error: 'Unable to load tour packages.' });
+  }
+});
+
+publicRouter.get('/packages/:id', async (req, res) => {
+  try {
+    const pkgRows = await db
+      .select()
+      .from(tourPackages)
+      .where(and(eq(tourPackages.id, req.params.id), eq(tourPackages.status, 'Published')))
+      .limit(1);
+
+    const pkg = pkgRows[0];
+    if (!pkg) {
+      res.status(404).json({ error: 'Package not found' });
+      return;
+    }
+
+    let suggestedVehicle = null;
+    if (pkg.suggested_vehicle_id) {
+      const vRows = await db
+        .select({
+          id: vehicles.id,
+          name: vehicles.name,
+          brand: vehicles.brand,
+          model: vehicles.model,
+          seats: vehicles.seats,
+          luggage_capacity: vehicles.luggage_capacity,
+          is_ac: vehicles.is_ac,
+          fuel_type: vehicles.fuel_type,
+          transmission: vehicles.transmission,
+          price_per_km: vehicles.price_per_km,
+          daily_rate: vehicles.daily_rate,
+          min_km_per_day: vehicles.min_km_per_day,
+          driver_allowance: vehicles.driver_allowance,
+          driver_available: vehicles.driver_available,
+          self_drive_available: vehicles.self_drive_available,
+          status: vehicles.status,
+          description: vehicles.description,
+        })
+        .from(vehicles)
+        .where(and(eq(vehicles.id, pkg.suggested_vehicle_id), eq(vehicles.is_archived, false), eq(vehicles.is_published, true)))
+        .limit(1);
+
+      const v = vRows[0];
+      if (v) {
+        const imgs = await db
+          .select({ image_url: vehicleImages.image_url })
+          .from(vehicleImages)
+          .where(eq(vehicleImages.vehicle_id, v.id))
+          .orderBy(asc(vehicleImages.sort_order));
+        suggestedVehicle = formatPublicVehicle(v, imgs.map((i) => i.image_url));
+      }
+    }
+
+    res.json({ ...pkg, suggested_vehicle: suggestedVehicle });
+  } catch (error) {
+    console.error('Package detail query failed:', error);
+    res.status(500).json({ error: 'Unable to load package details.' });
+  }
 });
 
 const createBookingSchema = z
@@ -230,7 +377,7 @@ function generateReferenceId(): string {
 }
 
 // POST /api/public/bookings — strictly forces Pending status + creates customer + logs history
-publicRouter.post('/bookings', (req, res) => {
+publicRouter.post('/bookings', async (req, res) => {
   const parsed = createBookingSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.issues[0]?.message || 'Validation failed', issues: parsed.error.issues });
@@ -239,6 +386,21 @@ publicRouter.post('/bookings', (req, res) => {
 
   const data = parsed.data;
   const normalizedMobile = data.mobile.replace(/\s+/g, ' ').trim();
+
+  // Optional Firebase ID token verification so signed-in clients link bookings securely
+  let userUid: string | null = null;
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    try {
+      const decoded = await adminAuth.verifyIdToken(authHeader.slice(7).trim());
+      userUid = decoded.uid;
+      if (decoded.email) {
+        await getOrCreateUser(decoded.uid, decoded.email);
+      }
+    } catch {
+      // Public booking submission still works without sign-in
+    }
+  }
 
   let estimatedAmount = 0;
   let vehicleId: string | null = null;
@@ -249,149 +411,217 @@ publicRouter.post('/bookings', (req, res) => {
     Math.ceil((new Date(data.return_date).getTime() - new Date(data.travel_date).getTime()) / (1000 * 60 * 60 * 24)) + 1
   );
 
-  if (data.booking_type === 'vehicle') {
-    if (!data.vehicle_id) {
-      res.status(400).json({ error: 'Please select a vehicle for vehicle rental booking' });
-      return;
-    }
-    const veh = db
-      .prepare('SELECT id, daily_rate, driver_allowance, self_drive_available, driver_available, is_archived, is_published FROM vehicles WHERE id = ?')
-      .get(data.vehicle_id) as
-      | {
-          id: string;
-          daily_rate: number;
-          driver_allowance: number;
-          self_drive_available: number;
-          driver_available: number;
-          is_archived: number;
-          is_published: number;
-        }
-      | undefined;
-
-    if (!veh || veh.is_archived || !veh.is_published) {
-      res.status(404).json({ error: 'Selected vehicle is not available' });
-      return;
-    }
-    if (data.driver_preference === 'Self-Drive' && !veh.self_drive_available) {
-      res.status(400).json({ error: 'Self-drive is not available for the selected vehicle' });
-      return;
-    }
-    vehicleId = veh.id;
-    const allowance = data.driver_preference === 'With Driver' ? veh.driver_allowance * dayDiff : 0;
-    estimatedAmount = veh.daily_rate * dayDiff + allowance;
-  } else {
-    if (!data.package_id) {
-      res.status(400).json({ error: 'Please select a tour package' });
-      return;
-    }
-    const pkg = db
-      .prepare("SELECT id, price, suggested_vehicle_id, status FROM tour_packages WHERE id = ? AND status = 'Published'")
-      .get(data.package_id) as
-      | { id: string; price: number; suggested_vehicle_id: string | null; status: string }
-      | undefined;
-    if (!pkg) {
-      res.status(404).json({ error: 'Selected tour package is not available' });
-      return;
-    }
-    packageId = pkg.id;
-    vehicleId = pkg.suggested_vehicle_id || null;
-    estimatedAmount = pkg.price * Math.max(1, Math.ceil(data.passengers / 2));
-  }
-
   try {
-    db.exec('BEGIN');
+    if (data.booking_type === 'vehicle') {
+      if (!data.vehicle_id) {
+        res.status(400).json({ error: 'Please select a vehicle for vehicle rental booking' });
+        return;
+      }
+      const vehRows = await db
+        .select({
+          id: vehicles.id,
+          daily_rate: vehicles.daily_rate,
+          driver_allowance: vehicles.driver_allowance,
+          self_drive_available: vehicles.self_drive_available,
+          is_archived: vehicles.is_archived,
+          is_published: vehicles.is_published,
+        })
+        .from(vehicles)
+        .where(eq(vehicles.id, data.vehicle_id))
+        .limit(1);
 
-    // Find or create customer by mobile
-    let customer = db.prepare('SELECT id FROM customers WHERE mobile = ?').get(normalizedMobile) as
-      | { id: string }
-      | undefined;
-
-    if (!customer) {
-      const custId = crypto.randomUUID();
-      db.prepare('INSERT INTO customers (id, name, mobile, email) VALUES (?, ?, ?, ?)').run(
-        custId,
-        data.customer_name,
-        normalizedMobile,
-        data.email || null
-      );
-      customer = { id: custId };
+      const veh = vehRows[0];
+      if (!veh || veh.is_archived || !veh.is_published) {
+        res.status(404).json({ error: 'Selected vehicle is not available' });
+        return;
+      }
+      if (data.driver_preference === 'Self-Drive' && !veh.self_drive_available) {
+        res.status(400).json({ error: 'Self-drive is not available for the selected vehicle' });
+        return;
+      }
+      vehicleId = veh.id;
+      const allowance = data.driver_preference === 'With Driver' ? veh.driver_allowance * dayDiff : 0;
+      estimatedAmount = veh.daily_rate * dayDiff + allowance;
     } else {
-      db.prepare('UPDATE customers SET name = ?, email = COALESCE(?, email) WHERE id = ?').run(
-        data.customer_name,
-        data.email || null,
-        customer.id
-      );
+      if (!data.package_id) {
+        res.status(400).json({ error: 'Please select a tour package' });
+        return;
+      }
+      const pkgRows = await db
+        .select({
+          id: tourPackages.id,
+          price: tourPackages.price,
+          suggested_vehicle_id: tourPackages.suggested_vehicle_id,
+        })
+        .from(tourPackages)
+        .where(and(eq(tourPackages.id, data.package_id), eq(tourPackages.status, 'Published')))
+        .limit(1);
+
+      const pkg = pkgRows[0];
+      if (!pkg) {
+        res.status(404).json({ error: 'Selected tour package is not available' });
+        return;
+      }
+      packageId = pkg.id;
+      vehicleId = pkg.suggested_vehicle_id || null;
+      estimatedAmount = pkg.price * Math.max(1, Math.ceil(data.passengers / 2));
     }
 
-    let referenceId = generateReferenceId();
-    while (db.prepare('SELECT 1 FROM bookings WHERE reference_id = ?').get(referenceId)) {
-      referenceId = generateReferenceId();
-    }
+    const result = await db.transaction(async (tx) => {
+      const existingCust = await tx
+        .select({ id: customers.id, email: customers.email })
+        .from(customers)
+        .where(eq(customers.mobile, normalizedMobile))
+        .limit(1);
 
-    const bookingId = crypto.randomUUID();
-    db.prepare(
-      `INSERT INTO bookings (
-        id, reference_id, booking_type, customer_id, vehicle_id, package_id, driver_id,
-        pickup_location, destination, travel_date, pickup_time, return_date, passengers,
-        driver_preference, notes, status, total_amount, quotation_breakdown
-      ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending', ?, ?)`
-    ).run(
-      bookingId,
-      referenceId,
-      data.booking_type,
-      customer.id,
-      vehicleId,
-      packageId,
-      data.pickup_location,
-      data.destination,
-      data.travel_date,
-      data.pickup_time,
-      data.return_date,
-      data.passengers,
-      data.driver_preference,
-      data.notes,
-      estimatedAmount,
-      JSON.stringify({ estimated_days: dayDiff, estimated_total: estimatedAmount })
-    );
+      let customerId: string;
+      if (existingCust.length === 0) {
+        customerId = crypto.randomUUID();
+        await tx.insert(customers).values({
+          id: customerId,
+          name: data.customer_name,
+          mobile: normalizedMobile,
+          email: data.email || null,
+        });
+      } else {
+        customerId = existingCust[0].id;
+        await tx
+          .update(customers)
+          .set({
+            name: data.customer_name,
+            email: data.email || existingCust[0].email,
+          })
+          .where(eq(customers.id, customerId));
+      }
 
-    db.prepare(
-      'INSERT INTO booking_status_history (id, booking_id, old_status, new_status, changed_by, note) VALUES (?, ?, NULL, ?, NULL, ?)'
-    ).run(crypto.randomUUID(), bookingId, 'Pending', 'Booking request submitted by customer');
+      let referenceId = generateReferenceId();
+      while (
+        (
+          await tx
+            .select({ id: bookings.id })
+            .from(bookings)
+            .where(eq(bookings.reference_id, referenceId))
+            .limit(1)
+        ).length > 0
+      ) {
+        referenceId = generateReferenceId();
+      }
 
-    db.exec('COMMIT');
+      const bookingId = crypto.randomUUID();
+      await tx.insert(bookings).values({
+        id: bookingId,
+        reference_id: referenceId,
+        booking_type: data.booking_type,
+        customer_id: customerId,
+        vehicle_id: vehicleId,
+        package_id: packageId,
+        driver_id: null,
+        user_uid: userUid,
+        pickup_location: data.pickup_location,
+        destination: data.destination,
+        travel_date: data.travel_date,
+        pickup_time: data.pickup_time,
+        return_date: data.return_date,
+        passengers: data.passengers,
+        driver_preference: data.driver_preference,
+        notes: data.notes,
+        status: 'Pending',
+        total_amount: estimatedAmount,
+        quotation_breakdown: { estimated_days: dayDiff, estimated_total: estimatedAmount },
+      });
+
+      await tx.insert(bookingStatusHistory).values({
+        id: crypto.randomUUID(),
+        booking_id: bookingId,
+        old_status: null,
+        new_status: 'Pending',
+        changed_by: null,
+        note: 'Booking request submitted by customer',
+      });
+
+      return { bookingId, referenceId };
+    });
 
     res.status(201).json({
-      id: bookingId,
-      reference_id: referenceId,
+      id: result.bookingId,
+      reference_id: result.referenceId,
       status: 'Pending',
       estimated_amount: estimatedAmount,
     });
   } catch (err) {
-    db.exec('ROLLBACK');
-    res.status(500).json({ error: err instanceof Error ? err.message : 'Unable to save booking' });
+    console.error('Create booking failed:', err);
+    res.status(500).json({ error: 'Unable to save booking. Please try again.' });
+  }
+});
+
+// GET /api/public/my-bookings — authenticated client bookings
+publicRouter.get('/my-bookings', requireAuth, async (req: FirebaseAuthRequest, res) => {
+  try {
+    const uid = req.user!.uid;
+    const rows = await db
+      .select({
+        id: bookings.id,
+        reference_id: bookings.reference_id,
+        booking_type: bookings.booking_type,
+        pickup_location: bookings.pickup_location,
+        destination: bookings.destination,
+        travel_date: bookings.travel_date,
+        return_date: bookings.return_date,
+        status: bookings.status,
+        total_amount: bookings.total_amount,
+        created_at: bookings.created_at,
+        vehicle_name: vehicles.name,
+        package_name: tourPackages.name,
+      })
+      .from(bookings)
+      .leftJoin(vehicles, eq(vehicles.id, bookings.vehicle_id))
+      .leftJoin(tourPackages, eq(tourPackages.id, bookings.package_id))
+      .where(eq(bookings.user_uid, uid))
+      .orderBy(desc(bookings.created_at));
+
+    res.json(rows);
+  } catch (err) {
+    console.error('Client bookings fetch failed:', err);
+    res.status(500).json({ error: 'Unable to load your bookings.' });
   }
 });
 
 // GET /api/public/bookings/:referenceId — safe summary for Booking Success page
-publicRouter.get('/bookings/:referenceId', (req, res) => {
-  const row = db
-    .prepare(
-      `SELECT b.reference_id, b.booking_type, b.pickup_location, b.destination,
-              b.travel_date, b.pickup_time, b.return_date, b.passengers,
-              b.driver_preference, b.status, b.total_amount, b.created_at,
-              v.name as vehicle_name, p.name as package_name
-       FROM bookings b
-       LEFT JOIN vehicles v ON v.id = b.vehicle_id
-       LEFT JOIN tour_packages p ON p.id = b.package_id
-       WHERE b.reference_id = ?`
-    )
-    .get(req.params.referenceId);
+publicRouter.get('/bookings/:referenceId', async (req, res) => {
+  try {
+    const rows = await db
+      .select({
+        reference_id: bookings.reference_id,
+        booking_type: bookings.booking_type,
+        pickup_location: bookings.pickup_location,
+        destination: bookings.destination,
+        travel_date: bookings.travel_date,
+        pickup_time: bookings.pickup_time,
+        return_date: bookings.return_date,
+        passengers: bookings.passengers,
+        driver_preference: bookings.driver_preference,
+        status: bookings.status,
+        total_amount: bookings.total_amount,
+        created_at: bookings.created_at,
+        vehicle_name: vehicles.name,
+        package_name: tourPackages.name,
+      })
+      .from(bookings)
+      .leftJoin(vehicles, eq(vehicles.id, bookings.vehicle_id))
+      .leftJoin(tourPackages, eq(tourPackages.id, bookings.package_id))
+      .where(eq(bookings.reference_id, req.params.referenceId))
+      .limit(1);
 
-  if (!row) {
-    res.status(404).json({ error: 'Booking reference not found' });
-    return;
+    const row = rows[0];
+    if (!row) {
+      res.status(404).json({ error: 'Booking reference not found' });
+      return;
+    }
+    res.json(row);
+  } catch (err) {
+    console.error('Booking lookup failed:', err);
+    res.status(500).json({ error: 'Unable to fetch booking summary.' });
   }
-  res.json(row);
 });
 
 const reviewSubmitSchema = z.object({
@@ -402,7 +632,7 @@ const reviewSubmitSchema = z.object({
   comment: z.string().trim().min(10, 'Please share a few words about your trip').max(1000),
 });
 
-publicRouter.post('/reviews', (req, res) => {
+publicRouter.post('/reviews', async (req, res) => {
   const parsed = reviewSubmitSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.issues[0]?.message || 'Invalid review input' });
@@ -410,13 +640,9 @@ publicRouter.post('/reviews', (req, res) => {
   }
   const d = parsed.data;
   const id = crypto.randomUUID();
-  const createdAt = new Date().toISOString();
-  db.prepare(
-    'INSERT INTO reviews (id, customer_name, location, trip_type, rating, comment, is_approved, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?)'
-  ).run(id, d.customer_name, d.location, d.trip_type, d.rating, d.comment, createdAt);
-  res.status(201).json({
-    id,
-    review: {
+  const createdAt = new Date();
+  try {
+    await db.insert(reviews).values({
       id,
       customer_name: d.customer_name,
       location: d.location,
@@ -425,7 +651,23 @@ publicRouter.post('/reviews', (req, res) => {
       comment: d.comment,
       is_approved: true,
       created_at: createdAt,
-    },
-    message: 'Thank you! Your review is now live.',
-  });
+    });
+    res.status(201).json({
+      id,
+      review: {
+        id,
+        customer_name: d.customer_name,
+        location: d.location,
+        trip_type: d.trip_type,
+        rating: d.rating,
+        comment: d.comment,
+        is_approved: true,
+        created_at: createdAt.toISOString(),
+      },
+      message: 'Thank you! Your review is now live.',
+    });
+  } catch (err) {
+    console.error('Review submit failed:', err);
+    res.status(500).json({ error: 'Unable to publish review right now.' });
+  }
 });

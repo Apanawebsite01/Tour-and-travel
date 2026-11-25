@@ -41,42 +41,44 @@ export function BookingSuccessPage() {
 
   return (
     <PublicLayout>
-      <div className="max-w-2xl mx-auto px-4 sm:px-6 py-16">
-        <div className="bg-white rounded-3xl border border-[#E2E8F0] shadow-[0_4px_20px_-2px_rgba(15,23,42,0.05)] p-8 sm:p-10 text-center">
-          <div className="w-14 h-14 rounded-full bg-emerald-50 text-[#16A34A] flex items-center justify-center mx-auto mb-5">
+      <div className="max-w-2xl mx-auto px-4 sm:px-6 py-16 lg:py-20">
+        <div className="bg-white rounded-3xl border border-slate-200/90 shadow-[0_16px_40px_-14px_rgba(15,23,42,0.08)] p-8 sm:p-11 text-center">
+          <div className="w-14 h-14 rounded-full bg-emerald-50 text-[#0F766E] flex items-center justify-center mx-auto mb-5">
             <CheckCircle2 className="w-8 h-8" />
           </div>
 
-          <p className="text-xs font-semibold text-[#16A34A] uppercase tracking-wider mb-2">
+          <p className="text-xs font-semibold text-[#0F766E] uppercase tracking-wider mb-2">
             Booking Request Received
           </p>
-          <h1 className="font-display text-2xl sm:text-3xl font-bold text-[#0F172A] mb-3">
+          <h1 className="font-display text-2xl sm:text-3xl font-bold text-[#0F172A] tracking-tight mb-3">
             Reference ID: <span className="font-mono text-[#0F766E]">{refId}</span>
           </h1>
-          <p className="text-sm text-[#475569] leading-relaxed mb-8">
-            Your enquiry has been logged as <strong>Pending</strong>. Our operations desk will confirm vehicle &amp; chauffeur availability shortly.
+          <p className="text-sm text-[#475569] leading-relaxed mb-8 max-w-md mx-auto">
+            Your enquiry has been logged as <strong className="text-[#0F172A]">Pending</strong>. Our operations desk will confirm vehicle &amp; chauffeur availability shortly.
           </p>
 
           {booking && (
-            <div className="text-left rounded-2xl bg-[#F8FAFC] border border-[#E2E8F0] p-5 space-y-2.5 text-sm mb-8">
+            <div className="text-left rounded-2xl bg-[#F7F8FA] border border-slate-200/80 p-5 sm:p-6 space-y-3 text-sm mb-8">
               <div className="flex justify-between gap-4">
                 <span className="text-[#64748B]">Trip</span>
-                <span className="font-semibold text-right">{booking.package_name || booking.vehicle_name}</span>
+                <span className="font-semibold text-right text-[#0F172A]">
+                  {booking.package_name || booking.vehicle_name}
+                </span>
               </div>
               <div className="flex justify-between gap-4">
                 <span className="text-[#64748B]">Route</span>
-                <span className="font-medium text-right">
+                <span className="font-medium text-right text-[#0F172A]">
                   {booking.pickup_location} → {booking.destination}
                 </span>
               </div>
               <div className="flex justify-between gap-4">
                 <span className="text-[#64748B]">Dates</span>
-                <span className="font-medium tabular-nums">
+                <span className="font-medium tabular-nums text-[#0F172A]">
                   {formatDateShort(booking.travel_date)} – {formatDateShort(booking.return_date)} ({booking.pickup_time})
                 </span>
               </div>
-              <div className="flex justify-between gap-4">
-                <span className="text-[#64748B]">Indicative Amount</span>
+              <div className="pt-2.5 border-t border-slate-200 flex justify-between gap-4">
+                <span className="font-medium text-[#475569]">Indicative Amount</span>
                 <span className="font-bold text-[#F97316] tabular-nums">{formatINR(booking.total_amount)}</span>
               </div>
             </div>
@@ -94,7 +96,7 @@ export function BookingSuccessPage() {
             </a>
             <Link
               to="/"
-              className="w-full sm:w-auto inline-flex items-center justify-center rounded-full border border-[#E2E8F0] hover:border-[#0F766E] text-[#0F172A] font-semibold text-sm px-6 py-3.5 transition-colors"
+              className="w-full sm:w-auto inline-flex items-center justify-center rounded-full border border-slate-200 hover:border-[#0F766E] text-[#0F172A] font-semibold text-sm px-6 py-3.5 transition-colors"
             >
               Back to Home
             </Link>

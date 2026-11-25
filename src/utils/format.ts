@@ -7,14 +7,14 @@ export function formatINR(amount: number): string {
 }
 
 export function formatDateShort(dateStr: string): string {
-  if (!dateStr) return '—';
+  if (!dateStr || typeof dateStr !== 'string') return '—';
   const dt = new Date(dateStr.includes('T') ? dateStr : `${dateStr}T00:00:00`);
   if (Number.isNaN(dt.getTime())) return dateStr;
   return dt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
 export function isSafeUrl(url: string | undefined | null): boolean {
-  if (!url) return false;
+  if (!url || typeof url !== 'string') return false;
   const trimmed = url.trim();
   if (trimmed.startsWith('/')) return true;
   try {
@@ -25,8 +25,12 @@ export function isSafeUrl(url: string | undefined | null): boolean {
   }
 }
 
-export function buildWhatsAppLink(whatsappNumber: string | undefined, message: string): string {
-  const digits = (whatsappNumber || '919811420750').replace(/\D/g, '');
+export function buildWhatsAppLink(whatsappNumber: string | number | undefined | null, message: string): string {
+  const raw =
+    whatsappNumber !== undefined && whatsappNumber !== null && String(whatsappNumber).trim() !== ''
+      ? String(whatsappNumber)
+      : '919811420750';
+  const digits = raw.replace(/\D/g, '') || '919811420750';
   return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
 }
 
