@@ -1,7 +1,7 @@
 import type { NextFunction, Request, Response } from 'express';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import { adminAuth } from '../lib/firebase-admin.ts';
-import { getOrCreateUser } from '../db/users.ts';
+import { upsertLocalUser } from '../../server/store.ts';
 
 export interface FirebaseAuthRequest extends Request {
   user?: DecodedIdToken;
@@ -23,7 +23,7 @@ export const requireAuth = async (
     const decodedToken = await adminAuth.verifyIdToken(token);
     req.user = decodedToken;
     if (decodedToken.email) {
-      await getOrCreateUser(decodedToken.uid, decodedToken.email);
+      upsertLocalUser(decodedToken.uid, decodedToken.email);
     }
     next();
   } catch (error) {

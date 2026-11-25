@@ -2,25 +2,8 @@ import { Router } from 'express';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { and, asc, desc, eq, gte, inArray, lte, ne } from 'drizzle-orm';
 import { z } from 'zod';
-import { db } from '../../src/db/index.ts';
-import {
-  bookings,
-  bookingStatusHistory,
-  customers,
-  drivers,
-  faqs,
-  gallery,
-  payments,
-  pricingRules,
-  profiles,
-  reviews,
-  siteSettings,
-  tourPackages,
-  vehicleImages,
-  vehicles,
-} from '../../src/db/schema.ts';
+import { getStore, saveStore } from '../store.ts';
 import { getUploadsDir } from '../paths.ts';
 import {
   type AuthenticatedRequest,
@@ -30,6 +13,7 @@ import {
   hashPassword,
   requireAdmin,
   signAdminToken,
+  upsertAdminProfile,
   verifyPassword,
 } from '../auth.ts';
 
@@ -74,11 +58,9 @@ function computePaymentSummaryFromRows(
   return { paid: netPaid, refunded, balance, payment_status: paymentStatus };
 }
 
-async function computePaymentSummary(bookingId: string, totalAmount: number) {
-  const rows = await db
-    .select({ amount: payments.amount, payment_type: payments.payment_type })
-    .from(payments)
-    .where(eq(payments.booking_id, bookingId));
+function computePaymentSummary(bookingId: string, totalAmount: number) {
+  const store = getStore();
+  const rows = store.payments.filter((p) => p.booking_id === bookingId);
   return computePaymentSummaryFromRows(rows, totalAmount);
 }
 
@@ -127,28 +109,17 @@ adminRouter.post('/auth/bootstrap', async (req, res) => {
     }
 
     const { full_name, email, password } = parsed.data;
-    const passwordHash = hashPassword(password);
-    const id = existing?.id || crypto.randomUUID();
+    const saved = upsertAdminProfile({
+      id: existing?.id,
+      full_name,
+      email,
+      password_hash: hashPassword(password),
+    });
 
-    if (existing) {
-      await db
-        .update(profiles)
-        .set({ full_name, email, password_hash: passwordHash })
-        .where(eq(profiles.id, id));
-    } else {
-      await db.insert(profiles).values({
-        id,
-        full_name,
-        email,
-        role: 'admin',
-        password_hash: passwordHash,
-      });
-    }
-
-    const token = signAdminToken({ sub: id, email, role: 'admin' });
+    const token = signAdminToken({ sub: saved.id, email: saved.email, role: 'admin' });
     res.status(201).json({
       token,
-      admin: { id, full_name, email, role: 'admin' },
+      admin: { id: saved.id, full_name: saved.full_name, email: saved.email, role: 'admin' },
     });
   } catch (err) {
     console.error('Admin bootstrap failed:', err);
@@ -177,20 +148,18 @@ adminRouter.post('/auth/login', async (req, res) => {
         res.status(401).json({ error: 'Invalid admin credentials' });
         return;
       }
-      let adminId = profile?.id;
-      const adminEmail = profile?.email || parsed.data.email || 'admin@travelgo.in';
-      const adminName = profile?.full_name || 'TravelGo Admin';
-      if (!profile) {
-        adminId = crypto.randomUUID();
-        await db.insert(profiles).values({
-          id: adminId,
-          full_name: adminName,
-          email: adminEmail,
-          role: 'admin',
+      const saved =
+        profile ||
+        upsertAdminProfile({
+          full_name: 'TravelGo Admin',
+          email: parsed.data.email || 'admin@travelgo.in',
+          password_hash: hashPassword(envPass),
         });
-      }
-      const token = signAdminToken({ sub: adminId!, email: adminEmail, role: 'admin' });
-      res.json({ token, admin: { id: adminId, full_name: adminName, email: adminEmail, role: 'admin' } });
+      const token = signAdminToken({ sub: saved.id, email: saved.email, role: 'admin' });
+      res.json({
+        token,
+        admin: { id: saved.id, full_name: saved.full_name, email: saved.email, role: 'admin' },
+      });
       return;
     }
 
@@ -256,29 +225,19 @@ adminRouter.put('/auth/credentials', async (req: AuthenticatedRequest, res) => {
 
   try {
     const profile = await getAdminProfile();
-    const id = profile?.id || req.admin!.sub;
     const { full_name, email, password } = parsed.data;
     const newHash = password ? hashPassword(password) : profile?.password_hash || null;
+    const saved = upsertAdminProfile({
+      id: profile?.id || req.admin!.sub,
+      full_name,
+      email,
+      password_hash: newHash,
+    });
 
-    if (profile) {
-      await db
-        .update(profiles)
-        .set({ full_name, email, password_hash: newHash })
-        .where(eq(profiles.id, id));
-    } else {
-      await db.insert(profiles).values({
-        id,
-        full_name,
-        email,
-        role: 'admin',
-        password_hash: newHash,
-      });
-    }
-
-    const token = signAdminToken({ sub: id, email, role: 'admin' });
+    const token = signAdminToken({ sub: saved.id, email: saved.email, role: 'admin' });
     res.json({
       token,
-      admin: { id, full_name, email, role: 'admin' },
+      admin: { id: saved.id, full_name: saved.full_name, email: saved.email, role: 'admin' },
       usingEnv: Boolean(getEnvAdminPassword()),
     });
   } catch (err) {
@@ -322,28 +281,28 @@ adminRouter.post('/upload', (req, res) => {
     return;
   }
 
-  fs.writeFileSync(targetPath, buffer);
-  res.status(201).json({ url: `/uploads/${safeName}` });
+  try {
+    fs.writeFileSync(targetPath, buffer);
+    res.status(201).json({ url: `/uploads/${safeName}` });
+  } catch {
+    res.status(201).json({ url: `data:${mimeType};base64,${cleanB64}` });
+  }
 });
 
 // ==========================================
 // DASHBOARD & REPORTS
 // ==========================================
-adminRouter.get('/dashboard', async (_req, res) => {
+adminRouter.get('/dashboard', (_req, res) => {
   try {
-    const [allVehicles, allBookings, allPayments, allCustomers, allDrivers, allPackages] = await Promise.all([
-      db.select().from(vehicles).where(eq(vehicles.is_archived, false)),
-      db.select().from(bookings).orderBy(desc(bookings.created_at)),
-      db.select().from(payments),
-      db.select({ id: customers.id, name: customers.name, mobile: customers.mobile }).from(customers),
-      db.select({ id: drivers.id, name: drivers.name }).from(drivers),
-      db.select({ id: tourPackages.id, name: tourPackages.name }).from(tourPackages),
-    ]);
+    const store = getStore();
+    const allVehicles = store.vehicles.filter((v) => !v.is_archived);
+    const allBookings = [...store.bookings].sort((a, b) => b.created_at.localeCompare(a.created_at));
+    const allPayments = store.payments;
 
-    const custMap = new Map(allCustomers.map((c) => [c.id, c]));
+    const custMap = new Map(store.customers.map((c) => [c.id, c]));
     const vehMap = new Map(allVehicles.map((v) => [v.id, v]));
-    const drvMap = new Map(allDrivers.map((d) => [d.id, d]));
-    const pkgMap = new Map(allPackages.map((p) => [p.id, p]));
+    const drvMap = new Map(store.drivers.map((d) => [d.id, d]));
+    const pkgMap = new Map(store.tour_packages.map((p) => [p.id, p]));
 
     let availableVehicles = 0;
     let unavailableVehicles = 0;
@@ -446,13 +405,12 @@ adminRouter.get('/dashboard', async (_req, res) => {
   }
 });
 
-adminRouter.get('/reports', async (_req, res) => {
+adminRouter.get('/reports', (_req, res) => {
   try {
-    const [allBookings, allVehicles, allPayments] = await Promise.all([
-      db.select().from(bookings),
-      db.select().from(vehicles).where(eq(vehicles.is_archived, false)),
-      db.select().from(payments),
-    ]);
+    const store = getStore();
+    const allBookings = store.bookings;
+    const allVehicles = store.vehicles.filter((v) => !v.is_archived);
+    const allPayments = store.payments;
 
     const statusMap = new Map<string, { count: number; amount: number }>();
     for (const b of allBookings) {
@@ -501,18 +459,16 @@ adminRouter.get('/reports', async (_req, res) => {
 // ==========================================
 // VEHICLE MANAGEMENT
 // ==========================================
-adminRouter.get('/vehicles', async (req, res) => {
+adminRouter.get('/vehicles', (req, res) => {
   try {
+    const store = getStore();
     const includeArchived = req.query.archived === 'true';
-    const [rows, imgs] = await Promise.all([
-      includeArchived
-        ? db.select().from(vehicles).orderBy(desc(vehicles.created_at))
-        : db.select().from(vehicles).where(eq(vehicles.is_archived, false)).orderBy(desc(vehicles.created_at)),
-      db.select().from(vehicleImages).orderBy(asc(vehicleImages.sort_order)),
-    ]);
+    const rows = store.vehicles
+      .filter((v) => includeArchived || !v.is_archived)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
 
     const imgMap = new Map<string, string[]>();
-    for (const i of imgs) {
+    for (const i of [...store.vehicle_images].sort((a, b) => a.sort_order - b.sort_order)) {
       const arr = imgMap.get(i.vehicle_id) || [];
       arr.push(i.image_url);
       imgMap.set(i.vehicle_id, arr);
@@ -530,41 +486,38 @@ adminRouter.get('/vehicles', async (req, res) => {
   }
 });
 
-adminRouter.get('/vehicles/:id', async (req, res) => {
+adminRouter.get('/vehicles/:id', (req, res) => {
   try {
-    const vRows = await db.select().from(vehicles).where(eq(vehicles.id, req.params.id)).limit(1);
-    const v = vRows[0];
+    const store = getStore();
+    const v = store.vehicles.find((veh) => veh.id === req.params.id);
     if (!v) {
       res.status(404).json({ error: 'Vehicle not found' });
       return;
     }
 
-    const [imgs, bookingHistory] = await Promise.all([
-      db
-        .select({ image_url: vehicleImages.image_url })
-        .from(vehicleImages)
-        .where(eq(vehicleImages.vehicle_id, req.params.id))
-        .orderBy(asc(vehicleImages.sort_order)),
-      db
-        .select({
-          id: bookings.id,
-          reference_id: bookings.reference_id,
-          travel_date: bookings.travel_date,
-          return_date: bookings.return_date,
-          destination: bookings.destination,
-          status: bookings.status,
-          total_amount: bookings.total_amount,
-          customer_name: customers.name,
-        })
-        .from(bookings)
-        .innerJoin(customers, eq(customers.id, bookings.customer_id))
-        .where(eq(bookings.vehicle_id, req.params.id))
-        .orderBy(desc(bookings.travel_date)),
-    ]);
+    const custMap = new Map(store.customers.map((c) => [c.id, c.name]));
+    const imgs = store.vehicle_images
+      .filter((i) => i.vehicle_id === req.params.id)
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map((i) => i.image_url);
+
+    const bookingHistory = store.bookings
+      .filter((b) => b.vehicle_id === req.params.id)
+      .sort((a, b) => b.travel_date.localeCompare(a.travel_date))
+      .map((b) => ({
+        id: b.id,
+        reference_id: b.reference_id,
+        travel_date: b.travel_date,
+        return_date: b.return_date,
+        destination: b.destination,
+        status: b.status,
+        total_amount: b.total_amount,
+        customer_name: custMap.get(b.customer_id) || 'Guest',
+      }));
 
     res.json({
       ...v,
-      images: imgs.map((i) => i.image_url),
+      images: imgs,
       bookingHistory,
     });
   } catch (err) {
@@ -595,7 +548,7 @@ const vehicleSchema = z.object({
   images: z.array(z.string().min(1)).default([]),
 });
 
-adminRouter.post('/vehicles', async (req, res) => {
+adminRouter.post('/vehicles', (req, res) => {
   const parsed = vehicleSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.issues[0]?.message || 'Invalid vehicle fields' });
@@ -605,38 +558,39 @@ adminRouter.post('/vehicles', async (req, res) => {
   const id = `veh-${crypto.randomUUID().slice(0, 8)}`;
 
   try {
-    await db.transaction(async (tx) => {
-      await tx.insert(vehicles).values({
-        id,
-        name: d.name,
-        brand: d.brand,
-        model: d.model,
-        registration_no: d.registration_no,
-        seats: d.seats,
-        luggage_capacity: d.luggage_capacity,
-        is_ac: d.is_ac,
-        fuel_type: d.fuel_type,
-        transmission: d.transmission,
-        price_per_km: d.price_per_km,
-        daily_rate: d.daily_rate,
-        min_km_per_day: d.min_km_per_day,
-        driver_allowance: d.driver_allowance,
-        driver_available: d.driver_available,
-        self_drive_available: d.self_drive_available,
-        status: d.status,
-        is_archived: false,
-        is_published: d.is_published,
-        description: d.description,
-      });
-      for (let idx = 0; idx < d.images.length; idx++) {
-        await tx.insert(vehicleImages).values({
-          id: crypto.randomUUID(),
-          vehicle_id: id,
-          image_url: d.images[idx],
-          sort_order: idx,
-        });
-      }
+    const store = getStore();
+    store.vehicles.push({
+      id,
+      name: d.name,
+      brand: d.brand,
+      model: d.model,
+      registration_no: d.registration_no,
+      seats: d.seats,
+      luggage_capacity: d.luggage_capacity,
+      is_ac: d.is_ac,
+      fuel_type: d.fuel_type,
+      transmission: d.transmission,
+      price_per_km: d.price_per_km,
+      daily_rate: d.daily_rate,
+      min_km_per_day: d.min_km_per_day,
+      driver_allowance: d.driver_allowance,
+      driver_available: d.driver_available,
+      self_drive_available: d.self_drive_available,
+      status: d.status,
+      is_archived: false,
+      is_published: d.is_published,
+      description: d.description,
+      created_at: new Date().toISOString(),
     });
+    d.images.forEach((img, idx) => {
+      store.vehicle_images.push({
+        id: crypto.randomUUID(),
+        vehicle_id: id,
+        image_url: img,
+        sort_order: idx,
+      });
+    });
+    saveStore(store);
     res.status(201).json({ id });
   } catch (err) {
     console.error('Create vehicle failed:', err);
@@ -644,7 +598,7 @@ adminRouter.post('/vehicles', async (req, res) => {
   }
 });
 
-adminRouter.put('/vehicles/:id', async (req, res) => {
+adminRouter.put('/vehicles/:id', (req, res) => {
   const parsed = vehicleSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.issues[0]?.message || 'Invalid vehicle fields' });
@@ -653,47 +607,44 @@ adminRouter.put('/vehicles/:id', async (req, res) => {
   const d = parsed.data;
 
   try {
-    const existing = await db.select({ id: vehicles.id }).from(vehicles).where(eq(vehicles.id, req.params.id)).limit(1);
-    if (existing.length === 0) {
+    const store = getStore();
+    const existing = store.vehicles.find((v) => v.id === req.params.id);
+    if (!existing) {
       res.status(404).json({ error: 'Vehicle not found' });
       return;
     }
 
-    await db.transaction(async (tx) => {
-      await tx
-        .update(vehicles)
-        .set({
-          name: d.name,
-          brand: d.brand,
-          model: d.model,
-          registration_no: d.registration_no,
-          seats: d.seats,
-          luggage_capacity: d.luggage_capacity,
-          is_ac: d.is_ac,
-          fuel_type: d.fuel_type,
-          transmission: d.transmission,
-          price_per_km: d.price_per_km,
-          daily_rate: d.daily_rate,
-          min_km_per_day: d.min_km_per_day,
-          driver_allowance: d.driver_allowance,
-          driver_available: d.driver_available,
-          self_drive_available: d.self_drive_available,
-          status: d.status,
-          is_published: d.is_published,
-          description: d.description,
-        })
-        .where(eq(vehicles.id, req.params.id));
-
-      await tx.delete(vehicleImages).where(eq(vehicleImages.vehicle_id, req.params.id));
-      for (let idx = 0; idx < d.images.length; idx++) {
-        await tx.insert(vehicleImages).values({
-          id: crypto.randomUUID(),
-          vehicle_id: req.params.id,
-          image_url: d.images[idx],
-          sort_order: idx,
-        });
-      }
+    Object.assign(existing, {
+      name: d.name,
+      brand: d.brand,
+      model: d.model,
+      registration_no: d.registration_no,
+      seats: d.seats,
+      luggage_capacity: d.luggage_capacity,
+      is_ac: d.is_ac,
+      fuel_type: d.fuel_type,
+      transmission: d.transmission,
+      price_per_km: d.price_per_km,
+      daily_rate: d.daily_rate,
+      min_km_per_day: d.min_km_per_day,
+      driver_allowance: d.driver_allowance,
+      driver_available: d.driver_available,
+      self_drive_available: d.self_drive_available,
+      status: d.status,
+      is_published: d.is_published,
+      description: d.description,
     });
+
+    store.vehicle_images = store.vehicle_images.filter((i) => i.vehicle_id !== req.params.id);
+    d.images.forEach((img, idx) => {
+      store.vehicle_images.push({
+        id: crypto.randomUUID(),
+        vehicle_id: req.params.id,
+        image_url: img,
+        sort_order: idx,
+      });
+    });
+    saveStore(store);
     res.json({ ok: true });
   } catch (err) {
     console.error('Update vehicle failed:', err);
@@ -701,21 +652,18 @@ adminRouter.put('/vehicles/:id', async (req, res) => {
   }
 });
 
-adminRouter.patch('/vehicles/:id/archive', async (req, res) => {
+adminRouter.patch('/vehicles/:id/archive', (req, res) => {
   try {
-    const archived = Boolean(req.body?.is_archived ?? true);
-    const cur = await db.select({ is_published: vehicles.is_published }).from(vehicles).where(eq(vehicles.id, req.params.id)).limit(1);
-    if (cur.length === 0) {
+    const store = getStore();
+    const cur = store.vehicles.find((v) => v.id === req.params.id);
+    if (!cur) {
       res.status(404).json({ error: 'Vehicle not found' });
       return;
     }
-    await db
-      .update(vehicles)
-      .set({
-        is_archived: archived,
-        is_published: archived ? false : cur[0].is_published,
-      })
-      .where(eq(vehicles.id, req.params.id));
+    const archived = Boolean(req.body?.is_archived ?? true);
+    cur.is_archived = archived;
+    cur.is_published = archived ? false : cur.is_published;
+    saveStore(store);
     res.json({ ok: true });
   } catch (err) {
     console.error('Archive vehicle failed:', err);
@@ -726,9 +674,10 @@ adminRouter.patch('/vehicles/:id/archive', async (req, res) => {
 // ==========================================
 // TOUR PACKAGES MANAGEMENT
 // ==========================================
-adminRouter.get('/packages', async (_req, res) => {
+adminRouter.get('/packages', (_req, res) => {
   try {
-    const rows = await db.select().from(tourPackages).orderBy(desc(tourPackages.created_at));
+    const store = getStore();
+    const rows = [...store.tour_packages].sort((a, b) => b.created_at.localeCompare(a.created_at));
     res.json(rows);
   } catch (err) {
     console.error('Admin packages list failed:', err);
@@ -736,14 +685,15 @@ adminRouter.get('/packages', async (_req, res) => {
   }
 });
 
-adminRouter.get('/packages/:id', async (req, res) => {
+adminRouter.get('/packages/:id', (req, res) => {
   try {
-    const rows = await db.select().from(tourPackages).where(eq(tourPackages.id, req.params.id)).limit(1);
-    if (rows.length === 0) {
+    const store = getStore();
+    const pkg = store.tour_packages.find((p) => p.id === req.params.id);
+    if (!pkg) {
       res.status(404).json({ error: 'Package not found' });
       return;
     }
-    res.json(rows[0]);
+    res.json(pkg);
   } catch (err) {
     console.error('Admin package detail failed:', err);
     res.status(500).json({ error: 'Unable to load package details' });
@@ -767,7 +717,7 @@ const packageSchema = z.object({
   images: z.array(z.string()).default([]),
 });
 
-adminRouter.post('/packages', async (req, res) => {
+adminRouter.post('/packages', (req, res) => {
   const parsed = packageSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.issues[0]?.message || 'Invalid package input' });
@@ -776,7 +726,8 @@ adminRouter.post('/packages', async (req, res) => {
   const d = parsed.data;
   const id = `pkg-${crypto.randomUUID().slice(0, 8)}`;
   try {
-    await db.insert(tourPackages).values({
+    const store = getStore();
+    store.tour_packages.push({
       id,
       name: d.name,
       destination: d.destination,
@@ -792,7 +743,11 @@ adminRouter.post('/packages', async (req, res) => {
       max_passengers: d.max_passengers,
       status: d.status,
       images: d.images,
+      rating: 4.9,
+      review_count: 0,
+      created_at: new Date().toISOString(),
     });
+    saveStore(store);
     res.status(201).json({ id });
   } catch (err) {
     console.error('Create package failed:', err);
@@ -800,7 +755,7 @@ adminRouter.post('/packages', async (req, res) => {
   }
 });
 
-adminRouter.put('/packages/:id', async (req, res) => {
+adminRouter.put('/packages/:id', (req, res) => {
   const parsed = packageSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.issues[0]?.message || 'Invalid package input' });
@@ -808,25 +763,29 @@ adminRouter.put('/packages/:id', async (req, res) => {
   }
   const d = parsed.data;
   try {
-    await db
-      .update(tourPackages)
-      .set({
-        name: d.name,
-        destination: d.destination,
-        days: d.days,
-        nights: d.nights,
-        price: d.price,
-        pickup_location: d.pickup_location,
-        dropoff_location: d.dropoff_location,
-        itinerary: d.itinerary,
-        inclusions: d.inclusions,
-        exclusions: d.exclusions,
-        suggested_vehicle_id: d.suggested_vehicle_id || null,
-        max_passengers: d.max_passengers,
-        status: d.status,
-        images: d.images,
-      })
-      .where(eq(tourPackages.id, req.params.id));
+    const store = getStore();
+    const existing = store.tour_packages.find((p) => p.id === req.params.id);
+    if (!existing) {
+      res.status(404).json({ error: 'Package not found' });
+      return;
+    }
+    Object.assign(existing, {
+      name: d.name,
+      destination: d.destination,
+      days: d.days,
+      nights: d.nights,
+      price: d.price,
+      pickup_location: d.pickup_location,
+      dropoff_location: d.dropoff_location,
+      itinerary: d.itinerary,
+      inclusions: d.inclusions,
+      exclusions: d.exclusions,
+      suggested_vehicle_id: d.suggested_vehicle_id || null,
+      max_passengers: d.max_passengers,
+      status: d.status,
+      images: d.images,
+    });
+    saveStore(store);
     res.json({ ok: true });
   } catch (err) {
     console.error('Update package failed:', err);
@@ -837,60 +796,44 @@ adminRouter.put('/packages/:id', async (req, res) => {
 // ==========================================
 // BOOKING MANAGEMENT + OVERLAP CHECK + STATE MACHINE
 // ==========================================
-adminRouter.get('/bookings', async (req, res) => {
+adminRouter.get('/bookings', (req, res) => {
   try {
+    const store = getStore();
     const statusFilter = typeof req.query.status === 'string' ? req.query.status : '';
     const search = typeof req.query.search === 'string' ? req.query.search.trim().toLowerCase() : '';
 
-    const [rows, allPayments] = await Promise.all([
-      db
-        .select({
-          id: bookings.id,
-          reference_id: bookings.reference_id,
-          booking_type: bookings.booking_type,
-          customer_id: bookings.customer_id,
-          vehicle_id: bookings.vehicle_id,
-          package_id: bookings.package_id,
-          driver_id: bookings.driver_id,
-          pickup_location: bookings.pickup_location,
-          destination: bookings.destination,
-          travel_date: bookings.travel_date,
-          pickup_time: bookings.pickup_time,
-          return_date: bookings.return_date,
-          passengers: bookings.passengers,
-          driver_preference: bookings.driver_preference,
-          notes: bookings.notes,
-          status: bookings.status,
-          total_amount: bookings.total_amount,
-          quotation_breakdown: bookings.quotation_breakdown,
-          admin_notes: bookings.admin_notes,
-          created_at: bookings.created_at,
-          customer_name: customers.name,
-          customer_mobile: customers.mobile,
-          customer_email: customers.email,
-          vehicle_name: vehicles.name,
-          vehicle_reg: vehicles.registration_no,
-          package_name: tourPackages.name,
-          driver_name: drivers.name,
-          driver_phone: drivers.phone,
-        })
-        .from(bookings)
-        .innerJoin(customers, eq(customers.id, bookings.customer_id))
-        .leftJoin(vehicles, eq(vehicles.id, bookings.vehicle_id))
-        .leftJoin(tourPackages, eq(tourPackages.id, bookings.package_id))
-        .leftJoin(drivers, eq(drivers.id, bookings.driver_id))
-        .orderBy(desc(bookings.created_at)),
-      db.select({ booking_id: payments.booking_id, amount: payments.amount, payment_type: payments.payment_type }).from(payments),
-    ]);
+    const custMap = new Map(store.customers.map((c) => [c.id, c]));
+    const vehMap = new Map(store.vehicles.map((v) => [v.id, v]));
+    const pkgMap = new Map(store.tour_packages.map((p) => [p.id, p]));
+    const drvMap = new Map(store.drivers.map((d) => [d.id, d]));
 
     const payByBooking = new Map<string, Array<{ amount: number; payment_type: string }>>();
-    for (const p of allPayments) {
+    for (const p of store.payments) {
       const arr = payByBooking.get(p.booking_id) || [];
       arr.push({ amount: p.amount, payment_type: p.payment_type });
       payByBooking.set(p.booking_id, arr);
     }
 
-    const enriched = rows
+    const enriched = [...store.bookings]
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .map((b) => {
+        const cust = custMap.get(b.customer_id);
+        const veh = b.vehicle_id ? vehMap.get(b.vehicle_id) : undefined;
+        const pkg = b.package_id ? pkgMap.get(b.package_id) : undefined;
+        const drv = b.driver_id ? drvMap.get(b.driver_id) : undefined;
+        return {
+          ...b,
+          customer_name: cust?.name || 'Guest',
+          customer_mobile: cust?.mobile || '',
+          customer_email: cust?.email || null,
+          vehicle_name: veh?.name || null,
+          vehicle_reg: veh?.registration_no || null,
+          package_name: pkg?.name || null,
+          driver_name: drv?.name || null,
+          driver_phone: drv?.phone || null,
+          ...computePaymentSummaryFromRows(payByBooking.get(b.id) || [], Number(b.total_amount || 0)),
+        };
+      })
       .filter((r) => {
         if (statusFilter && statusFilter !== 'All' && r.status !== statusFilter) return false;
         if (search) {
@@ -898,11 +841,7 @@ adminRouter.get('/bookings', async (req, res) => {
           if (!hay.includes(search)) return false;
         }
         return true;
-      })
-      .map((r) => ({
-        ...r,
-        ...computePaymentSummaryFromRows(payByBooking.get(r.id) || [], Number(r.total_amount || 0)),
-      }));
+      });
 
     res.json(enriched);
   } catch (err) {
@@ -911,121 +850,78 @@ adminRouter.get('/bookings', async (req, res) => {
   }
 });
 
-adminRouter.get('/bookings/:id', async (req, res) => {
+adminRouter.get('/bookings/:id', (req, res) => {
   try {
-    const rows = await db
-      .select({
-        id: bookings.id,
-        reference_id: bookings.reference_id,
-        booking_type: bookings.booking_type,
-        customer_id: bookings.customer_id,
-        vehicle_id: bookings.vehicle_id,
-        package_id: bookings.package_id,
-        driver_id: bookings.driver_id,
-        pickup_location: bookings.pickup_location,
-        destination: bookings.destination,
-        travel_date: bookings.travel_date,
-        pickup_time: bookings.pickup_time,
-        return_date: bookings.return_date,
-        passengers: bookings.passengers,
-        driver_preference: bookings.driver_preference,
-        notes: bookings.notes,
-        status: bookings.status,
-        total_amount: bookings.total_amount,
-        quotation_breakdown: bookings.quotation_breakdown,
-        admin_notes: bookings.admin_notes,
-        created_at: bookings.created_at,
-        customer_name: customers.name,
-        customer_mobile: customers.mobile,
-        customer_email: customers.email,
-        vehicle_name: vehicles.name,
-        vehicle_brand: vehicles.brand,
-        vehicle_model: vehicles.model,
-        vehicle_reg: vehicles.registration_no,
-        price_per_km: vehicles.price_per_km,
-        daily_rate: vehicles.daily_rate,
-        min_km_per_day: vehicles.min_km_per_day,
-        driver_allowance: vehicles.driver_allowance,
-        package_name: tourPackages.name,
-        package_days: tourPackages.days,
-        package_nights: tourPackages.nights,
-        driver_name: drivers.name,
-        driver_phone: drivers.phone,
-        driver_licence: drivers.licence_no,
-      })
-      .from(bookings)
-      .innerJoin(customers, eq(customers.id, bookings.customer_id))
-      .leftJoin(vehicles, eq(vehicles.id, bookings.vehicle_id))
-      .leftJoin(tourPackages, eq(tourPackages.id, bookings.package_id))
-      .leftJoin(drivers, eq(drivers.id, bookings.driver_id))
-      .where(eq(bookings.id, req.params.id))
-      .limit(1);
-
-    const row = rows[0];
-    if (!row) {
+    const store = getStore();
+    const b = store.bookings.find((row) => row.id === req.params.id);
+    if (!b) {
       res.status(404).json({ error: 'Booking not found' });
       return;
     }
 
-    const [payRows, historyRows, activeDrivers, busyDriverBookings, conflicts] = await Promise.all([
-      db
-        .select()
-        .from(payments)
-        .where(eq(payments.booking_id, req.params.id))
-        .orderBy(desc(payments.payment_date), desc(payments.created_at)),
-      db
-        .select()
-        .from(bookingStatusHistory)
-        .where(eq(bookingStatusHistory.booking_id, req.params.id))
-        .orderBy(desc(bookingStatusHistory.changed_at)),
-      db
-        .select()
-        .from(drivers)
-        .where(and(eq(drivers.is_active, true), gte(drivers.licence_expiry, row.return_date))),
-      db
-        .select({ driver_id: bookings.driver_id })
-        .from(bookings)
-        .where(
-          and(
-            ne(bookings.id, req.params.id),
-            inArray(bookings.status, [...ACTIVE_STATUSES]),
-            lte(bookings.travel_date, row.return_date),
-            gte(bookings.return_date, row.travel_date)
-          )
-        ),
-      row.vehicle_id
-        ? db
-            .select({
-              id: bookings.id,
-              reference_id: bookings.reference_id,
-              travel_date: bookings.travel_date,
-              return_date: bookings.return_date,
-              status: bookings.status,
-            })
-            .from(bookings)
-            .where(
-              and(
-                ne(bookings.id, req.params.id),
-                eq(bookings.vehicle_id, row.vehicle_id),
-                inArray(bookings.status, [...ACTIVE_STATUSES]),
-                lte(bookings.travel_date, row.return_date),
-                gte(bookings.return_date, row.travel_date)
-              )
-            )
-        : Promise.resolve([]),
-    ]);
+    const cust = store.customers.find((c) => c.id === b.customer_id);
+    const veh = b.vehicle_id ? store.vehicles.find((v) => v.id === b.vehicle_id) : undefined;
+    const pkg = b.package_id ? store.tour_packages.find((p) => p.id === b.package_id) : undefined;
+    const drv = b.driver_id ? store.drivers.find((d) => d.id === b.driver_id) : undefined;
 
-    const busyDriverIds = new Set(busyDriverBookings.map((b) => b.driver_id).filter(Boolean));
-    const availableDrivers = activeDrivers.filter((d) => !busyDriverIds.has(d.id));
+    const payRows = store.payments
+      .filter((p) => p.booking_id === req.params.id)
+      .sort((a, b2) => b2.payment_date.localeCompare(a.payment_date) || b2.created_at.localeCompare(a.created_at));
+
+    const historyRows = store.booking_status_history
+      .filter((h) => h.booking_id === req.params.id)
+      .sort((a, b2) => b2.changed_at.localeCompare(a.changed_at));
+
+    const activeOverlapBookings = store.bookings.filter(
+      (other) =>
+        other.id !== req.params.id &&
+        (ACTIVE_STATUSES as readonly string[]).includes(other.status) &&
+        other.travel_date <= b.return_date &&
+        other.return_date >= b.travel_date
+    );
+
+    const busyDriverIds = new Set(activeOverlapBookings.map((x) => x.driver_id).filter(Boolean));
+    const availableDrivers = store.drivers.filter(
+      (d) => d.is_active && d.licence_expiry >= b.return_date && !busyDriverIds.has(d.id)
+    );
+
+    const conflicts = b.vehicle_id
+      ? activeOverlapBookings
+          .filter((x) => x.vehicle_id === b.vehicle_id)
+          .map((x) => ({
+            id: x.id,
+            reference_id: x.reference_id,
+            travel_date: x.travel_date,
+            return_date: x.return_date,
+            status: x.status,
+          }))
+      : [];
 
     res.json({
-      ...row,
-      ...computePaymentSummaryFromRows(payRows, Number(row.total_amount || 0)),
+      ...b,
+      customer_name: cust?.name || 'Guest',
+      customer_mobile: cust?.mobile || '',
+      customer_email: cust?.email || null,
+      vehicle_name: veh?.name || null,
+      vehicle_brand: veh?.brand || null,
+      vehicle_model: veh?.model || null,
+      vehicle_reg: veh?.registration_no || null,
+      price_per_km: veh?.price_per_km ?? null,
+      daily_rate: veh?.daily_rate ?? null,
+      min_km_per_day: veh?.min_km_per_day ?? null,
+      driver_allowance: veh?.driver_allowance ?? null,
+      package_name: pkg?.name || null,
+      package_days: pkg?.days ?? null,
+      package_nights: pkg?.nights ?? null,
+      driver_name: drv?.name || null,
+      driver_phone: drv?.phone || null,
+      driver_licence: drv?.licence_no || null,
+      ...computePaymentSummaryFromRows(payRows, Number(b.total_amount || 0)),
       payments: payRows,
       history: historyRows,
       conflicts,
       availableDrivers,
-      allowedNextStatuses: VALID_TRANSITIONS[row.status] || [],
+      allowedNextStatuses: VALID_TRANSITIONS[b.status] || [],
     });
   } catch (err) {
     console.error('Admin booking detail failed:', err);
@@ -1040,7 +936,7 @@ const updateBookingStatusSchema = z.object({
   vehicle_id: z.string().nullable().optional(),
 });
 
-adminRouter.patch('/bookings/:id/status', async (req: AuthenticatedRequest, res) => {
+adminRouter.patch('/bookings/:id/status', (req: AuthenticatedRequest, res) => {
   const parsed = updateBookingStatusSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.issues[0]?.message || 'Invalid status update' });
@@ -1048,8 +944,8 @@ adminRouter.patch('/bookings/:id/status', async (req: AuthenticatedRequest, res)
   }
 
   try {
-    const bRows = await db.select().from(bookings).where(eq(bookings.id, req.params.id)).limit(1);
-    const booking = bRows[0];
+    const store = getStore();
+    const booking = store.bookings.find((b) => b.id === req.params.id);
     if (!booking) {
       res.status(404).json({ error: 'Booking not found' });
       return;
@@ -1073,12 +969,7 @@ adminRouter.patch('/bookings/:id/status', async (req: AuthenticatedRequest, res)
     }
 
     if (targetDriverId) {
-      const drvRows = await db
-        .select({ id: drivers.id, licence_expiry: drivers.licence_expiry, is_active: drivers.is_active })
-        .from(drivers)
-        .where(eq(drivers.id, targetDriverId))
-        .limit(1);
-      const drv = drvRows[0];
+      const drv = store.drivers.find((d) => d.id === targetDriverId);
       if (!drv || !drv.is_active) {
         res.status(400).json({ error: 'Selected driver is inactive or missing.' });
         return;
@@ -1087,77 +978,56 @@ adminRouter.patch('/bookings/:id/status', async (req: AuthenticatedRequest, res)
         res.status(400).json({ error: 'Driver licence expires before the trip return date.' });
         return;
       }
-      const driverConflicts = await db
-        .select({ reference_id: bookings.reference_id })
-        .from(bookings)
-        .where(
-          and(
-            ne(bookings.id, req.params.id),
-            eq(bookings.driver_id, targetDriverId),
-            inArray(bookings.status, [...ACTIVE_STATUSES]),
-            lte(bookings.travel_date, booking.return_date),
-            gte(bookings.return_date, booking.travel_date)
-          )
-        )
-        .limit(1);
-
-      if (driverConflicts.length > 0) {
+      const driverConflict = store.bookings.find(
+        (other) =>
+          other.id !== req.params.id &&
+          other.driver_id === targetDriverId &&
+          (ACTIVE_STATUSES as readonly string[]).includes(other.status) &&
+          other.travel_date <= booking.return_date &&
+          other.return_date >= booking.travel_date
+      );
+      if (driverConflict) {
         res.status(409).json({
-          error: `Selected driver is already assigned to booking ${driverConflicts[0].reference_id} on overlapping dates.`,
+          error: `Selected driver is already assigned to booking ${driverConflict.reference_id} on overlapping dates.`,
         });
         return;
       }
     }
 
-    await db.transaction(async (tx) => {
-      if (targetVehicleId && (ACTIVE_STATUSES as readonly string[]).includes(nextStatus)) {
-        const vehicleConflicts = await tx
-          .select({ id: bookings.id })
-          .from(bookings)
-          .where(
-            and(
-              ne(bookings.id, req.params.id),
-              eq(bookings.vehicle_id, targetVehicleId),
-              inArray(bookings.status, [...ACTIVE_STATUSES]),
-              lte(bookings.travel_date, booking.return_date),
-              gte(bookings.return_date, booking.travel_date)
-            )
-          )
-          .limit(1);
-
-        if (vehicleConflicts.length > 0) {
-          throw new Error('OVERLAP_CONFLICT');
-        }
+    if (targetVehicleId && (ACTIVE_STATUSES as readonly string[]).includes(nextStatus)) {
+      const vehicleConflict = store.bookings.find(
+        (other) =>
+          other.id !== req.params.id &&
+          other.vehicle_id === targetVehicleId &&
+          (ACTIVE_STATUSES as readonly string[]).includes(other.status) &&
+          other.travel_date <= booking.return_date &&
+          other.return_date >= booking.travel_date
+      );
+      if (vehicleConflict) {
+        res.status(409).json({
+          error: 'Vehicle overlap conflict: another confirmed/active booking already occupies this vehicle for overlapping dates.',
+        });
+        return;
       }
+    }
 
-      await tx
-        .update(bookings)
-        .set({
-          status: nextStatus,
-          vehicle_id: targetVehicleId,
-          driver_id: targetDriverId,
-        })
-        .where(eq(bookings.id, req.params.id));
+    booking.status = nextStatus;
+    booking.vehicle_id = targetVehicleId;
+    booking.driver_id = targetDriverId;
 
-      await tx.insert(bookingStatusHistory).values({
-        id: crypto.randomUUID(),
-        booking_id: req.params.id,
-        old_status: currentStatus,
-        new_status: nextStatus,
-        changed_by: req.admin!.sub,
-        note: parsed.data.note || `Status changed to ${nextStatus}`,
-      });
+    store.booking_status_history.push({
+      id: crypto.randomUUID(),
+      booking_id: req.params.id,
+      old_status: currentStatus,
+      new_status: nextStatus,
+      changed_by: req.admin!.sub,
+      note: parsed.data.note || `Status changed to ${nextStatus}`,
+      changed_at: new Date().toISOString(),
     });
+    saveStore(store);
 
     res.json({ ok: true, status: nextStatus });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Status update failed';
-    if (msg.includes('OVERLAP_CONFLICT')) {
-      res.status(409).json({
-        error: 'Vehicle overlap conflict: another confirmed/active booking already occupies this vehicle for overlapping dates.',
-      });
-      return;
-    }
     console.error('Booking status update failed:', err);
     res.status(500).json({ error: 'Unable to update booking status' });
   }
@@ -1171,7 +1041,7 @@ const updateBookingDetailsSchema = z.object({
   driver_id: z.string().nullable().optional(),
 });
 
-adminRouter.patch('/bookings/:id', async (req, res) => {
+adminRouter.patch('/bookings/:id', (req, res) => {
   const parsed = updateBookingDetailsSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid booking update fields' });
@@ -1179,8 +1049,8 @@ adminRouter.patch('/bookings/:id', async (req, res) => {
   }
 
   try {
-    const bRows = await db.select().from(bookings).where(eq(bookings.id, req.params.id)).limit(1);
-    const existing = bRows[0];
+    const store = getStore();
+    const existing = store.bookings.find((b) => b.id === req.params.id);
     if (!existing) {
       res.status(404).json({ error: 'Booking not found' });
       return;
@@ -1190,46 +1060,30 @@ adminRouter.patch('/bookings/:id', async (req, res) => {
     const nextVehicleId = d.vehicle_id !== undefined ? d.vehicle_id : existing.vehicle_id;
     const nextDriverId = d.driver_id !== undefined ? d.driver_id : existing.driver_id;
 
-    await db.transaction(async (tx) => {
-      if (nextVehicleId && (ACTIVE_STATUSES as readonly string[]).includes(existing.status)) {
-        const vehicleConflicts = await tx
-          .select({ id: bookings.id })
-          .from(bookings)
-          .where(
-            and(
-              ne(bookings.id, req.params.id),
-              eq(bookings.vehicle_id, nextVehicleId),
-              inArray(bookings.status, [...ACTIVE_STATUSES]),
-              lte(bookings.travel_date, existing.return_date),
-              gte(bookings.return_date, existing.travel_date)
-            )
-          )
-          .limit(1);
-
-        if (vehicleConflicts.length > 0) {
-          throw new Error('OVERLAP_CONFLICT');
-        }
+    if (nextVehicleId && (ACTIVE_STATUSES as readonly string[]).includes(existing.status)) {
+      const vehicleConflict = store.bookings.find(
+        (other) =>
+          other.id !== req.params.id &&
+          other.vehicle_id === nextVehicleId &&
+          (ACTIVE_STATUSES as readonly string[]).includes(other.status) &&
+          other.travel_date <= existing.return_date &&
+          other.return_date >= existing.travel_date
+      );
+      if (vehicleConflict) {
+        res.status(409).json({ error: 'Vehicle already has an overlapping confirmed booking for these dates.' });
+        return;
       }
+    }
 
-      await tx
-        .update(bookings)
-        .set({
-          total_amount: d.total_amount ?? existing.total_amount,
-          quotation_breakdown: d.quotation_breakdown ?? existing.quotation_breakdown,
-          admin_notes: d.admin_notes ?? existing.admin_notes,
-          vehicle_id: nextVehicleId,
-          driver_id: nextDriverId,
-        })
-        .where(eq(bookings.id, req.params.id));
-    });
+    existing.total_amount = d.total_amount ?? existing.total_amount;
+    existing.quotation_breakdown = d.quotation_breakdown ?? existing.quotation_breakdown;
+    existing.admin_notes = d.admin_notes ?? existing.admin_notes;
+    existing.vehicle_id = nextVehicleId;
+    existing.driver_id = nextDriverId;
+    saveStore(store);
 
     res.json({ ok: true });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Update failed';
-    if (msg.includes('OVERLAP_CONFLICT')) {
-      res.status(409).json({ error: 'Vehicle already has an overlapping confirmed booking for these dates.' });
-      return;
-    }
     console.error('Update booking details failed:', err);
     res.status(500).json({ error: 'Unable to update booking details' });
   }
@@ -1238,26 +1092,25 @@ adminRouter.patch('/bookings/:id', async (req, res) => {
 // ==========================================
 // PAYMENTS
 // ==========================================
-adminRouter.get('/payments', async (_req, res) => {
+adminRouter.get('/payments', (_req, res) => {
   try {
-    const rows = await db
-      .select({
-        id: payments.id,
-        booking_id: payments.booking_id,
-        amount: payments.amount,
-        payment_type: payments.payment_type,
-        method: payments.method,
-        payment_date: payments.payment_date,
-        transaction_ref: payments.transaction_ref,
-        created_at: payments.created_at,
-        reference_id: bookings.reference_id,
-        total_amount: bookings.total_amount,
-        customer_name: customers.name,
-      })
-      .from(payments)
-      .innerJoin(bookings, eq(bookings.id, payments.booking_id))
-      .innerJoin(customers, eq(customers.id, bookings.customer_id))
-      .orderBy(desc(payments.payment_date), desc(payments.created_at));
+    const store = getStore();
+    const bMap = new Map(store.bookings.map((b) => [b.id, b]));
+    const cMap = new Map(store.customers.map((c) => [c.id, c]));
+
+    const rows = [...store.payments]
+      .sort((a, b) => b.payment_date.localeCompare(a.payment_date) || b.created_at.localeCompare(a.created_at))
+      .map((p) => {
+        const booking = bMap.get(p.booking_id);
+        const cust = booking ? cMap.get(booking.customer_id) : undefined;
+        return {
+          ...p,
+          reference_id: booking?.reference_id || '',
+          total_amount: booking?.total_amount || 0,
+          customer_name: cust?.name || 'Guest',
+        };
+      });
+
     res.json(rows);
   } catch (err) {
     console.error('Admin payments list failed:', err);
@@ -1274,7 +1127,7 @@ const paymentSchema = z.object({
   transaction_ref: z.string().trim().max(120).optional().default(''),
 });
 
-adminRouter.post('/payments', async (req, res) => {
+adminRouter.post('/payments', (req, res) => {
   const parsed = paymentSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.issues[0]?.message || 'Invalid payment payload' });
@@ -1282,18 +1135,14 @@ adminRouter.post('/payments', async (req, res) => {
   }
   const d = parsed.data;
   try {
-    const bRows = await db
-      .select({ id: bookings.id, total_amount: bookings.total_amount })
-      .from(bookings)
-      .where(eq(bookings.id, d.booking_id))
-      .limit(1);
-    const booking = bRows[0];
+    const store = getStore();
+    const booking = store.bookings.find((b) => b.id === d.booking_id);
     if (!booking) {
       res.status(404).json({ error: 'Booking not found' });
       return;
     }
     const id = crypto.randomUUID();
-    await db.insert(payments).values({
+    store.payments.push({
       id,
       booking_id: d.booking_id,
       amount: d.amount,
@@ -1301,9 +1150,11 @@ adminRouter.post('/payments', async (req, res) => {
       method: d.method,
       payment_date: d.payment_date,
       transaction_ref: d.transaction_ref,
+      created_at: new Date().toISOString(),
     });
+    saveStore(store);
 
-    const summary = await computePaymentSummary(d.booking_id, booking.total_amount);
+    const summary = computePaymentSummary(d.booking_id, booking.total_amount);
     res.status(201).json({ id, ...summary });
   } catch (err) {
     console.error('Create payment failed:', err);
@@ -1314,9 +1165,10 @@ adminRouter.post('/payments', async (req, res) => {
 // ==========================================
 // DRIVERS
 // ==========================================
-adminRouter.get('/drivers', async (_req, res) => {
+adminRouter.get('/drivers', (_req, res) => {
   try {
-    const rows = await db.select().from(drivers).orderBy(desc(drivers.created_at));
+    const store = getStore();
+    const rows = [...store.drivers].sort((a, b) => b.created_at.localeCompare(a.created_at));
     const now = new Date();
     const in30Days = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     const todayStr = now.toISOString().slice(0, 10);
@@ -1343,7 +1195,7 @@ const driverSchema = z.object({
   is_active: z.boolean().default(true),
 });
 
-adminRouter.post('/drivers', async (req, res) => {
+adminRouter.post('/drivers', (req, res) => {
   const parsed = driverSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.issues[0]?.message || 'Invalid driver data' });
@@ -1352,7 +1204,8 @@ adminRouter.post('/drivers', async (req, res) => {
   const d = parsed.data;
   const id = `drv-${crypto.randomUUID().slice(0, 8)}`;
   try {
-    await db.insert(drivers).values({
+    const store = getStore();
+    store.drivers.push({
       id,
       name: d.name,
       phone: d.phone,
@@ -1360,7 +1213,9 @@ adminRouter.post('/drivers', async (req, res) => {
       licence_no: d.licence_no,
       licence_expiry: d.licence_expiry,
       is_active: d.is_active,
+      created_at: new Date().toISOString(),
     });
+    saveStore(store);
     res.status(201).json({ id });
   } catch (err) {
     console.error('Create driver failed:', err);
@@ -1368,7 +1223,7 @@ adminRouter.post('/drivers', async (req, res) => {
   }
 });
 
-adminRouter.put('/drivers/:id', async (req, res) => {
+adminRouter.put('/drivers/:id', (req, res) => {
   const parsed = driverSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.issues[0]?.message || 'Invalid driver data' });
@@ -1376,17 +1231,21 @@ adminRouter.put('/drivers/:id', async (req, res) => {
   }
   const d = parsed.data;
   try {
-    await db
-      .update(drivers)
-      .set({
-        name: d.name,
-        phone: d.phone,
-        photo_url: d.photo_url,
-        licence_no: d.licence_no,
-        licence_expiry: d.licence_expiry,
-        is_active: d.is_active,
-      })
-      .where(eq(drivers.id, req.params.id));
+    const store = getStore();
+    const existing = store.drivers.find((drv) => drv.id === req.params.id);
+    if (!existing) {
+      res.status(404).json({ error: 'Driver not found' });
+      return;
+    }
+    Object.assign(existing, {
+      name: d.name,
+      phone: d.phone,
+      photo_url: d.photo_url,
+      licence_no: d.licence_no,
+      licence_expiry: d.licence_expiry,
+      is_active: d.is_active,
+    });
+    saveStore(store);
     res.json({ ok: true });
   } catch (err) {
     console.error('Update driver failed:', err);
@@ -1397,21 +1256,18 @@ adminRouter.put('/drivers/:id', async (req, res) => {
 // ==========================================
 // CUSTOMERS
 // ==========================================
-adminRouter.get('/customers', async (_req, res) => {
+adminRouter.get('/customers', (_req, res) => {
   try {
-    const [custRows, bookingRows] = await Promise.all([
-      db.select().from(customers).orderBy(desc(customers.created_at)),
-      db.select({ customer_id: bookings.customer_id, total_amount: bookings.total_amount }).from(bookings),
-    ]);
-
+    const store = getStore();
     const agg = new Map<string, { booking_count: number; total_spend: number }>();
-    for (const b of bookingRows) {
+    for (const b of store.bookings) {
       const cur = agg.get(b.customer_id) || { booking_count: 0, total_spend: 0 };
       cur.booking_count += 1;
       cur.total_spend += Number(b.total_amount || 0);
       agg.set(b.customer_id, cur);
     }
 
+    const custRows = [...store.customers].sort((a, b) => b.created_at.localeCompare(a.created_at));
     res.json(
       custRows.map((c) => {
         const s = agg.get(c.id) || { booking_count: 0, total_spend: 0 };
@@ -1424,33 +1280,33 @@ adminRouter.get('/customers', async (_req, res) => {
   }
 });
 
-adminRouter.get('/customers/:id', async (req, res) => {
+adminRouter.get('/customers/:id', (req, res) => {
   try {
-    const cRows = await db.select().from(customers).where(eq(customers.id, req.params.id)).limit(1);
-    const customer = cRows[0];
+    const store = getStore();
+    const customer = store.customers.find((c) => c.id === req.params.id);
     if (!customer) {
       res.status(404).json({ error: 'Customer not found' });
       return;
     }
-    const custBookings = await db
-      .select({
-        id: bookings.id,
-        reference_id: bookings.reference_id,
-        booking_type: bookings.booking_type,
-        destination: bookings.destination,
-        travel_date: bookings.travel_date,
-        return_date: bookings.return_date,
-        status: bookings.status,
-        total_amount: bookings.total_amount,
-        created_at: bookings.created_at,
-        vehicle_name: vehicles.name,
-        package_name: tourPackages.name,
-      })
-      .from(bookings)
-      .leftJoin(vehicles, eq(vehicles.id, bookings.vehicle_id))
-      .leftJoin(tourPackages, eq(tourPackages.id, bookings.package_id))
-      .where(eq(bookings.customer_id, req.params.id))
-      .orderBy(desc(bookings.created_at));
+    const vehMap = new Map(store.vehicles.map((v) => [v.id, v.name]));
+    const pkgMap = new Map(store.tour_packages.map((p) => [p.id, p.name]));
+
+    const custBookings = store.bookings
+      .filter((b) => b.customer_id === req.params.id)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .map((b) => ({
+        id: b.id,
+        reference_id: b.reference_id,
+        booking_type: b.booking_type,
+        destination: b.destination,
+        travel_date: b.travel_date,
+        return_date: b.return_date,
+        status: b.status,
+        total_amount: b.total_amount,
+        created_at: b.created_at,
+        vehicle_name: b.vehicle_id ? vehMap.get(b.vehicle_id) || null : null,
+        package_name: b.package_id ? pkgMap.get(b.package_id) || null : null,
+      }));
 
     res.json({ ...customer, bookings: custBookings });
   } catch (err) {
@@ -1462,9 +1318,10 @@ adminRouter.get('/customers/:id', async (req, res) => {
 // ==========================================
 // PRICING RULES
 // ==========================================
-adminRouter.get('/pricing', async (_req, res) => {
+adminRouter.get('/pricing', (_req, res) => {
   try {
-    const rules = await db.select().from(pricingRules).orderBy(asc(pricingRules.category));
+    const store = getStore();
+    const rules = [...store.pricing_rules].sort((a, b) => a.category.localeCompare(b.category));
     res.json(rules);
   } catch (err) {
     console.error('Pricing rules list failed:', err);
@@ -1485,7 +1342,7 @@ const pricingSchema = z.object({
   is_active: z.boolean().default(true),
 });
 
-adminRouter.post('/pricing', async (req, res) => {
+adminRouter.post('/pricing', (req, res) => {
   const parsed = pricingSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.issues[0]?.message || 'Invalid pricing rule' });
@@ -1494,7 +1351,8 @@ adminRouter.post('/pricing', async (req, res) => {
   const d = parsed.data;
   const id = `pr-${crypto.randomUUID().slice(0, 8)}`;
   try {
-    await db.insert(pricingRules).values({
+    const store = getStore();
+    store.pricing_rules.push({
       id,
       name: d.name,
       category: d.category,
@@ -1507,6 +1365,7 @@ adminRouter.post('/pricing', async (req, res) => {
       seasonal_multiplier: d.seasonal_multiplier,
       is_active: d.is_active,
     });
+    saveStore(store);
     res.status(201).json({ id });
   } catch (err) {
     console.error('Create pricing rule failed:', err);
@@ -1514,7 +1373,7 @@ adminRouter.post('/pricing', async (req, res) => {
   }
 });
 
-adminRouter.put('/pricing/:id', async (req, res) => {
+adminRouter.put('/pricing/:id', (req, res) => {
   const parsed = pricingSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.issues[0]?.message || 'Invalid pricing rule' });
@@ -1522,21 +1381,25 @@ adminRouter.put('/pricing/:id', async (req, res) => {
   }
   const d = parsed.data;
   try {
-    await db
-      .update(pricingRules)
-      .set({
-        name: d.name,
-        category: d.category,
-        per_km_rate: d.per_km_rate,
-        min_km_per_day: d.min_km_per_day,
-        driver_allowance: d.driver_allowance,
-        night_charge: d.night_charge,
-        waiting_charge_per_hr: d.waiting_charge_per_hr,
-        extra_km_charge: d.extra_km_charge,
-        seasonal_multiplier: d.seasonal_multiplier,
-        is_active: d.is_active,
-      })
-      .where(eq(pricingRules.id, req.params.id));
+    const store = getStore();
+    const existing = store.pricing_rules.find((r) => r.id === req.params.id);
+    if (!existing) {
+      res.status(404).json({ error: 'Pricing rule not found' });
+      return;
+    }
+    Object.assign(existing, {
+      name: d.name,
+      category: d.category,
+      per_km_rate: d.per_km_rate,
+      min_km_per_day: d.min_km_per_day,
+      driver_allowance: d.driver_allowance,
+      night_charge: d.night_charge,
+      waiting_charge_per_hr: d.waiting_charge_per_hr,
+      extra_km_charge: d.extra_km_charge,
+      seasonal_multiplier: d.seasonal_multiplier,
+      is_active: d.is_active,
+    });
+    saveStore(store);
     res.json({ ok: true });
   } catch (err) {
     console.error('Update pricing rule failed:', err);
@@ -1547,34 +1410,34 @@ adminRouter.put('/pricing/:id', async (req, res) => {
 // ==========================================
 // AVAILABILITY CALENDAR
 // ==========================================
-adminRouter.get('/calendar', async (_req, res) => {
+adminRouter.get('/calendar', (_req, res) => {
   try {
-    const [vehRows, bookingRows] = await Promise.all([
-      db
-        .select({ id: vehicles.id, name: vehicles.name, brand: vehicles.brand, status: vehicles.status })
-        .from(vehicles)
-        .where(eq(vehicles.is_archived, false))
-        .orderBy(asc(vehicles.name)),
-      db
-        .select({
-          id: bookings.id,
-          reference_id: bookings.reference_id,
-          vehicle_id: bookings.vehicle_id,
-          travel_date: bookings.travel_date,
-          return_date: bookings.return_date,
-          destination: bookings.destination,
-          status: bookings.status,
-          customer_name: customers.name,
-        })
-        .from(bookings)
-        .innerJoin(customers, eq(customers.id, bookings.customer_id))
-        .where(inArray(bookings.status, ['Confirmed', 'Vehicle Assigned', 'In Progress', 'Pending', 'Contacted']))
-        .orderBy(asc(bookings.travel_date)),
-    ]);
+    const store = getStore();
+    const custMap = new Map(store.customers.map((c) => [c.id, c.name]));
+
+    const vehRows = store.vehicles
+      .filter((v) => !v.is_archived)
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((v) => ({ id: v.id, name: v.name, brand: v.brand, status: v.status }));
+
+    const calendarStatuses = new Set(['Confirmed', 'Vehicle Assigned', 'In Progress', 'Pending', 'Contacted']);
+    const bookingRows = store.bookings
+      .filter((b) => Boolean(b.vehicle_id) && calendarStatuses.has(b.status))
+      .sort((a, b) => a.travel_date.localeCompare(b.travel_date))
+      .map((b) => ({
+        id: b.id,
+        reference_id: b.reference_id,
+        vehicle_id: b.vehicle_id,
+        travel_date: b.travel_date,
+        return_date: b.return_date,
+        destination: b.destination,
+        status: b.status,
+        customer_name: custMap.get(b.customer_id) || 'Guest',
+      }));
 
     res.json({
       vehicles: vehRows,
-      bookings: bookingRows.filter((b) => Boolean(b.vehicle_id)),
+      bookings: bookingRows,
     });
   } catch (err) {
     console.error('Calendar load failed:', err);
@@ -1585,9 +1448,12 @@ adminRouter.get('/calendar', async (_req, res) => {
 // ==========================================
 // GALLERY, REVIEWS, FAQS & WEBSITE SETTINGS
 // ==========================================
-adminRouter.get('/gallery', async (_req, res) => {
+adminRouter.get('/gallery', (_req, res) => {
   try {
-    const rows = await db.select().from(gallery).orderBy(asc(gallery.sort_order), desc(gallery.created_at));
+    const store = getStore();
+    const rows = [...store.gallery].sort(
+      (a, b) => a.sort_order - b.sort_order || b.created_at.localeCompare(a.created_at)
+    );
     res.json(rows);
   } catch (err) {
     console.error('Gallery list failed:', err);
@@ -1595,7 +1461,7 @@ adminRouter.get('/gallery', async (_req, res) => {
   }
 });
 
-adminRouter.post('/gallery', async (req, res) => {
+adminRouter.post('/gallery', (req, res) => {
   const schema = z.object({
     image_url: z.string().min(1),
     caption: z.string().trim().min(2).max(200),
@@ -1609,13 +1475,16 @@ adminRouter.post('/gallery', async (req, res) => {
   }
   const id = crypto.randomUUID();
   try {
-    await db.insert(gallery).values({
+    const store = getStore();
+    store.gallery.push({
       id,
       image_url: parsed.data.image_url,
       caption: parsed.data.caption,
       location: parsed.data.location,
       sort_order: parsed.data.sort_order,
+      created_at: new Date().toISOString(),
     });
+    saveStore(store);
     res.status(201).json({ id });
   } catch (err) {
     console.error('Add gallery failed:', err);
@@ -1623,9 +1492,11 @@ adminRouter.post('/gallery', async (req, res) => {
   }
 });
 
-adminRouter.delete('/gallery/:id', async (req, res) => {
+adminRouter.delete('/gallery/:id', (req, res) => {
   try {
-    await db.delete(gallery).where(eq(gallery.id, req.params.id));
+    const store = getStore();
+    store.gallery = store.gallery.filter((g) => g.id !== req.params.id);
+    saveStore(store);
     res.json({ ok: true });
   } catch (err) {
     console.error('Delete gallery failed:', err);
@@ -1633,9 +1504,10 @@ adminRouter.delete('/gallery/:id', async (req, res) => {
   }
 });
 
-adminRouter.get('/reviews', async (_req, res) => {
+adminRouter.get('/reviews', (_req, res) => {
   try {
-    const rows = await db.select().from(reviews).orderBy(desc(reviews.created_at));
+    const store = getStore();
+    const rows = [...store.reviews].sort((a, b) => b.created_at.localeCompare(a.created_at));
     res.json(rows);
   } catch (err) {
     console.error('Admin reviews list failed:', err);
@@ -1643,10 +1515,14 @@ adminRouter.get('/reviews', async (_req, res) => {
   }
 });
 
-adminRouter.patch('/reviews/:id', async (req, res) => {
+adminRouter.patch('/reviews/:id', (req, res) => {
   try {
-    const approved = Boolean(req.body?.is_approved);
-    await db.update(reviews).set({ is_approved: approved }).where(eq(reviews.id, req.params.id));
+    const store = getStore();
+    const rev = store.reviews.find((r) => r.id === req.params.id);
+    if (rev) {
+      rev.is_approved = Boolean(req.body?.is_approved);
+      saveStore(store);
+    }
     res.json({ ok: true });
   } catch (err) {
     console.error('Toggle review failed:', err);
@@ -1654,9 +1530,11 @@ adminRouter.patch('/reviews/:id', async (req, res) => {
   }
 });
 
-adminRouter.delete('/reviews/:id', async (req, res) => {
+adminRouter.delete('/reviews/:id', (req, res) => {
   try {
-    await db.delete(reviews).where(eq(reviews.id, req.params.id));
+    const store = getStore();
+    store.reviews = store.reviews.filter((r) => r.id !== req.params.id);
+    saveStore(store);
     res.json({ ok: true });
   } catch (err) {
     console.error('Delete review failed:', err);
@@ -1664,9 +1542,10 @@ adminRouter.delete('/reviews/:id', async (req, res) => {
   }
 });
 
-adminRouter.get('/faqs', async (_req, res) => {
+adminRouter.get('/faqs', (_req, res) => {
   try {
-    const rows = await db.select().from(faqs).orderBy(asc(faqs.sort_order));
+    const store = getStore();
+    const rows = [...store.faqs].sort((a, b) => a.sort_order - b.sort_order);
     res.json(rows);
   } catch (err) {
     console.error('Admin FAQs list failed:', err);
@@ -1674,7 +1553,7 @@ adminRouter.get('/faqs', async (_req, res) => {
   }
 });
 
-adminRouter.post('/faqs', async (req, res) => {
+adminRouter.post('/faqs', (req, res) => {
   const schema = z.object({
     question: z.string().trim().min(4).max(300),
     answer: z.string().trim().min(4).max(1500),
@@ -1688,13 +1567,15 @@ adminRouter.post('/faqs', async (req, res) => {
   }
   const id = crypto.randomUUID();
   try {
-    await db.insert(faqs).values({
+    const store = getStore();
+    store.faqs.push({
       id,
       question: parsed.data.question,
       answer: parsed.data.answer,
       sort_order: parsed.data.sort_order,
       is_active: parsed.data.is_active,
     });
+    saveStore(store);
     res.status(201).json({ id });
   } catch (err) {
     console.error('Create FAQ failed:', err);
@@ -1702,9 +1583,11 @@ adminRouter.post('/faqs', async (req, res) => {
   }
 });
 
-adminRouter.delete('/faqs/:id', async (req, res) => {
+adminRouter.delete('/faqs/:id', (req, res) => {
   try {
-    await db.delete(faqs).where(eq(faqs.id, req.params.id));
+    const store = getStore();
+    store.faqs = store.faqs.filter((f) => f.id !== req.params.id);
+    saveStore(store);
     res.json({ ok: true });
   } catch (err) {
     console.error('Delete FAQ failed:', err);
@@ -1727,12 +1610,12 @@ const STRING_SETTING_KEYS = new Set([
   'about_description',
 ]);
 
-adminRouter.get('/settings', async (_req, res) => {
+adminRouter.get('/settings', (_req, res) => {
   try {
-    const rows = await db.select().from(siteSettings);
+    const store = getStore();
     const out: Record<string, unknown> = {};
-    for (const r of rows) {
-      out[r.key] = STRING_SETTING_KEYS.has(r.key) && r.value !== null && r.value !== undefined ? String(r.value) : r.value;
+    for (const [k, v] of Object.entries(store.site_settings || {})) {
+      out[k] = STRING_SETTING_KEYS.has(k) && v !== null && v !== undefined ? String(v) : v;
     }
     res.json(out);
   } catch (err) {
@@ -1741,23 +1624,20 @@ adminRouter.get('/settings', async (_req, res) => {
   }
 });
 
-adminRouter.put('/settings', async (req, res) => {
+adminRouter.put('/settings', (req, res) => {
   const body = req.body;
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     res.status(400).json({ error: 'Invalid settings payload' });
     return;
   }
   try {
-    await db.transaction(async (tx) => {
-      for (const [k, v] of Object.entries(body)) {
-        if (typeof k === 'string' && k.length > 0 && k.length < 80) {
-          await tx
-            .insert(siteSettings)
-            .values({ key: k, value: v })
-            .onConflictDoUpdate({ target: siteSettings.key, set: { value: v } });
-        }
+    const store = getStore();
+    for (const [k, v] of Object.entries(body)) {
+      if (typeof k === 'string' && k.length > 0 && k.length < 80) {
+        store.site_settings[k] = v;
       }
-    });
+    }
+    saveStore(store);
     res.json({ ok: true });
   } catch (err) {
     console.error('Save settings failed:', err);

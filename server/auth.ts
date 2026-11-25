@@ -1,15 +1,15 @@
 import crypto from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
-import { eq } from 'drizzle-orm';
-import { db } from '../src/db/index.ts';
-import { profiles } from '../src/db/schema.ts';
-
-const EPHEMERAL_SECRET = crypto.randomBytes(32).toString('hex');
+import { getStore, saveStore, type ProfileRecord } from './store.ts';
 
 function getSessionSecret(): string {
-  return process.env.ADMIN_SESSION_SECRET && process.env.ADMIN_SESSION_SECRET.trim().length >= 16
-    ? process.env.ADMIN_SESSION_SECRET.trim()
-    : EPHEMERAL_SECRET;
+  const configured = process.env.ADMIN_SESSION_SECRET?.trim();
+  if (configured && configured.length >= 16) {
+    return configured;
+  }
+  // Deterministic per-deployment fallback so serverless instances verify tokens consistently
+  const seed = process.env.VERCEL_PROJECT_ID || process.env.FIREBASE_PROJECT_ID || 'travelgo-local-auth';
+  return crypto.createHash('sha256').update(`${seed}:travelgo-session-v1`).digest('hex');
 }
 
 export function hashPassword(password: string): string {
@@ -92,22 +92,35 @@ export function getEnvAdminPassword(): string {
   return (process.env.ADMIN_PASSWORD || '').trim();
 }
 
-export async function getAdminProfile() {
-  try {
-    const rows = await db
-      .select({
-        id: profiles.id,
-        full_name: profiles.full_name,
-        email: profiles.email,
-        role: profiles.role,
-        password_hash: profiles.password_hash,
-      })
-      .from(profiles)
-      .where(eq(profiles.role, 'admin'))
-      .limit(1);
-    return rows[0];
-  } catch (error) {
-    console.error('Failed to query admin profile:', error);
-    throw new Error('Unable to verify administrator profile.', { cause: error });
+export async function getAdminProfile(): Promise<ProfileRecord | undefined> {
+  const store = getStore();
+  return store.profiles.find((p) => p.role === 'admin');
+}
+
+export function upsertAdminProfile(input: {
+  id?: string;
+  full_name: string;
+  email: string;
+  password_hash: string | null;
+}): ProfileRecord {
+  const store = getStore();
+  const existing = store.profiles.find((p) => p.role === 'admin');
+  if (existing) {
+    existing.full_name = input.full_name;
+    existing.email = input.email;
+    existing.password_hash = input.password_hash;
+    saveStore(store);
+    return existing;
   }
+  const created: ProfileRecord = {
+    id: input.id || crypto.randomUUID(),
+    full_name: input.full_name,
+    email: input.email,
+    role: 'admin',
+    password_hash: input.password_hash,
+    created_at: new Date().toISOString(),
+  };
+  store.profiles.push(created);
+  saveStore(store);
+  return created;
 }

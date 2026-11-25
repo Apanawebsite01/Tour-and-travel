@@ -4,7 +4,6 @@ import { seedDatabase } from './seed.ts';
 import { publicRouter } from './routes/public.ts';
 import { adminRouter } from './routes/admin.ts';
 import { getUploadsDir } from './paths.ts';
-import { hasDatabaseConfig } from '../src/db/index.ts';
 
 let seedPromise: Promise<void> | null = null;
 
@@ -26,22 +25,16 @@ export function createApiApp(): express.Express {
   app.use('/uploads', express.static(getUploadsDir()));
 
   app.get('/api/health', (_req, res) => {
-    res.json({ ok: true, dbConfigured: hasDatabaseConfig(), timestamp: new Date().toISOString() });
+    res.json({ ok: true, storage: 'local', timestamp: new Date().toISOString() });
   });
 
   app.use('/api', async (_req, res, next) => {
-    if (!hasDatabaseConfig()) {
-      res.status(503).json({
-        error: 'Database is not configured on this host. Set DATABASE_URL (or SQL_HOST/SQL_USER/SQL_PASSWORD/SQL_DB_NAME) in environment variables.',
-      });
-      return;
-    }
     try {
       await ensureSeeded();
       next();
     } catch (error) {
-      console.error('Database initialization error:', error);
-      res.status(503).json({ error: 'Database service temporarily unavailable. Please try again.' });
+      console.error('Store initialization error:', error);
+      res.status(500).json({ error: 'Unable to initialize application data.' });
     }
   });
 
