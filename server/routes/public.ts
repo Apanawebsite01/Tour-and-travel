@@ -410,8 +410,22 @@ publicRouter.post('/reviews', (req, res) => {
   }
   const d = parsed.data;
   const id = crypto.randomUUID();
+  const createdAt = new Date().toISOString();
   db.prepare(
-    'INSERT INTO reviews (id, customer_name, location, trip_type, rating, comment, is_approved) VALUES (?, ?, ?, ?, ?, ?, 0)'
-  ).run(id, d.customer_name, d.location, d.trip_type, d.rating, d.comment);
-  res.status(201).json({ id, message: 'Thank you! Your review has been submitted for moderation.' });
+    'INSERT INTO reviews (id, customer_name, location, trip_type, rating, comment, is_approved, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?)'
+  ).run(id, d.customer_name, d.location, d.trip_type, d.rating, d.comment, createdAt);
+  res.status(201).json({
+    id,
+    review: {
+      id,
+      customer_name: d.customer_name,
+      location: d.location,
+      trip_type: d.trip_type,
+      rating: d.rating,
+      comment: d.comment,
+      is_approved: true,
+      created_at: createdAt,
+    },
+    message: 'Thank you! Your review is now live.',
+  });
 });

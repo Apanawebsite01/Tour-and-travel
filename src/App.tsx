@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { SiteProvider } from './context/SiteContext';
 import { AuthProvider } from './context/AuthContext';
+import { ClientAuthProvider } from './context/ClientAuthContext';
 import { HomePage } from './pages/public/HomePage';
 import { VehiclesPage } from './pages/public/VehiclesPage';
 import { VehicleDetailsPage } from './pages/public/VehicleDetailsPage';
@@ -8,6 +9,7 @@ import { PackagesPage } from './pages/public/PackagesPage';
 import { PackageDetailsPage } from './pages/public/PackageDetailsPage';
 import { BookingPage } from './pages/public/BookingPage';
 import { BookingSuccessPage } from './pages/public/BookingSuccessPage';
+import { ClientAuthPage } from './pages/public/ClientAuthPage';
 import {
   AboutPage,
   ContactPage,
@@ -40,24 +42,27 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <SiteProvider>
-          <Routes>
-            {/* Public Website Routes */}
-            <Route path="/" element={<HomePage />} />
-            <Route path="/about" element={<AboutPage />} />
-            <Route path="/vehicles" element={<VehiclesPage />} />
-            <Route path="/vehicles/:id" element={<VehicleDetailsPage />} />
-            <Route path="/packages" element={<PackagesPage />} />
-            <Route path="/packages/:id" element={<PackageDetailsPage />} />
-            <Route path="/booking" element={<BookingPage />} />
-            <Route path="/booking/success/:refId" element={<BookingSuccessPage />} />
-            <Route path="/gallery" element={<GalleryPage />} />
-            <Route path="/reviews" element={<ReviewsPage />} />
-            <Route path="/faqs" element={<FaqsPage />} />
-            <Route path="/contact" element={<ContactPage />} />
-            <Route path="/privacy-policy" element={<PolicyPage type="privacy" />} />
-            <Route path="/terms" element={<PolicyPage type="terms" />} />
-            <Route path="/cancellation-policy" element={<PolicyPage type="cancellation" />} />
+        <ClientAuthProvider>
+          <SiteProvider>
+            <Routes>
+              {/* Public Website Routes */}
+              <Route path="/" element={<HomePage />} />
+              <Route path="/about" element={<AboutPage />} />
+              <Route path="/vehicles" element={<VehiclesPage />} />
+              <Route path="/vehicles/:id" element={<VehicleDetailsPage />} />
+              <Route path="/packages" element={<PackagesPage />} />
+              <Route path="/packages/:id" element={<PackageDetailsPage />} />
+              <Route path="/booking" element={<BookingPage />} />
+              <Route path="/booking/success/:refId" element={<BookingSuccessPage />} />
+              <Route path="/account" element={<ClientAuthPage />} />
+              <Route path="/login" element={<ClientAuthPage />} />
+              <Route path="/gallery" element={<GalleryPage />} />
+              <Route path="/reviews" element={<ReviewsPage />} />
+              <Route path="/faqs" element={<FaqsPage />} />
+              <Route path="/contact" element={<ContactPage />} />
+              <Route path="/privacy-policy" element={<PolicyPage type="privacy" />} />
+              <Route path="/terms" element={<PolicyPage type="terms" />} />
+              <Route path="/cancellation-policy" element={<PolicyPage type="cancellation" />} />
 
             {/* Admin Portal Routes */}
             <Route path="/admin/login" element={<AdminLoginPage />} />
@@ -77,8 +82,9 @@ export default function App() {
             <Route path="/admin/reports" element={<AdminReportsPage />} />
 
             <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </SiteProvider>
+            </Routes>
+          </SiteProvider>
+        </ClientAuthProvider>
       </AuthProvider>
     </BrowserRouter>
   );

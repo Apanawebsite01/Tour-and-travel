@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
 import { AlertCircle, Calendar, Car, Compass, ShieldCheck } from 'lucide-react';
 import { PublicLayout } from '../../components/layout/PublicLayout';
 import { useSite } from '../../context/SiteContext';
+import { useClientAuth } from '../../context/ClientAuthContext';
 import { calcTripDays, formatINR } from '../../utils/format';
 
 const bookingSchema = z
@@ -39,6 +40,7 @@ export function BookingPage() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const { vehicles, packages } = useSite();
+  const { clientUser, savedPhone } = useClientAuth();
 
   const defaultTravel = useMemo(() => {
     const d = new Date();
@@ -83,6 +85,16 @@ export function BookingPage() {
       setPackageId(packages[0].id);
     }
   }, [bookingType, vehicleId, packageId, vehicles, packages]);
+
+  useEffect(() => {
+    if (clientUser) {
+      if (clientUser.displayName) setCustomerName((prev) => prev || clientUser.displayName || '');
+      if (clientUser.email) setEmail((prev) => prev || clientUser.email || '');
+    }
+    if (savedPhone) {
+      setMobile((prev) => prev || savedPhone);
+    }
+  }, [clientUser, savedPhone]);
 
   const selectedVehicle = vehicles.find((v) => v.id === vehicleId);
   const selectedPackage = packages.find((p) => p.id === packageId);
@@ -345,8 +357,21 @@ export function BookingPage() {
             </div>
 
             {/* Step 4: Traveller Contact */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2 border-t border-[#E2E8F0]">
-              <div>
+            <div className="pt-2 border-t border-[#E2E8F0] space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                <span className="font-semibold text-[#0F172A]">Traveller Contact Details</span>
+                {clientUser ? (
+                  <Link to="/account" className="text-[#0F766E] font-medium hover:underline">
+                    Signed in as {clientUser.displayName || clientUser.email}
+                  </Link>
+                ) : (
+                  <Link to="/account?redirect=/booking" className="text-[#0F766E] font-medium hover:underline">
+                    Sign in with Google or Email to auto-fill
+                  </Link>
+                )}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
                 <label className="block text-xs font-semibold text-[#475569] mb-1.5">Full Name *</label>
                 <input
                   type="text"
@@ -381,6 +406,7 @@ export function BookingPage() {
                   placeholder="name@example.com"
                   className="w-full h-12 px-3.5 rounded-xl border border-[#E2E8F0] text-sm focus:outline-none focus:border-[#0F766E]"
                 />
+              </div>
               </div>
             </div>
 

@@ -19,6 +19,7 @@ interface SiteContextValue {
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
+  prependReview: (review: ReviewItem) => void;
 }
 
 const SiteContext = createContext<SiteContextValue | undefined>(undefined);
@@ -32,6 +33,10 @@ export function SiteProvider({ children }: { children: React.ReactNode }) {
   const [faqs, setFaqs] = useState<FaqItem[]>(DEFAULT_FAQS);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const prependReview = useCallback((review: ReviewItem) => {
+    setReviews((prev) => [review, ...prev]);
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -60,7 +65,7 @@ export function SiteProvider({ children }: { children: React.ReactNode }) {
   }, [refresh]);
 
   return (
-    <SiteContext.Provider value={{ settings, vehicles, packages, reviews, gallery, faqs, loading, error, refresh }}>
+    <SiteContext.Provider value={{ settings, vehicles, packages, reviews, gallery, faqs, loading, error, refresh, prependReview }}>
       {children}
     </SiteContext.Provider>
   );

@@ -2,11 +2,17 @@ import React, { useState } from 'react';
 import { Link, NavLink } from 'react-router-dom';
 import { Menu, MessageCircle, X, Phone, Mail, MapPin } from 'lucide-react';
 import { useSite } from '../../context/SiteContext';
+import { useClientAuth } from '../../context/ClientAuthContext';
 import { buildWhatsAppLink, isSafeUrl } from '../../utils/format';
 
 export function PublicLayout({ children }: { children: React.ReactNode }) {
   const { settings } = useSite();
+  const { clientUser } = useClientAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  const accountLabel = clientUser
+    ? (clientUser.displayName?.trim().split(/\s+/)[0] || 'Account').slice(0, 14)
+    : 'Sign In';
 
   const brandName = settings?.business_name || 'TravelGo';
   const waHref = buildWhatsAppLink(
@@ -42,14 +48,14 @@ export function PublicLayout({ children }: { children: React.ReactNode }) {
             <NavLink to="/packages" className={navLinkClass}>
               Packages
             </NavLink>
-            <NavLink to="/gallery" className={navLinkClass}>
-              Gallery
-            </NavLink>
             <NavLink to="/reviews" className={navLinkClass}>
               Reviews
             </NavLink>
             <NavLink to="/contact" className={navLinkClass}>
               Contact
+            </NavLink>
+            <NavLink to="/account" className={navLinkClass}>
+              {accountLabel}
             </NavLink>
           </nav>
 
@@ -84,6 +90,7 @@ export function PublicLayout({ children }: { children: React.ReactNode }) {
               { to: '/reviews', label: 'Reviews' },
               { to: '/faqs', label: 'FAQs' },
               { to: '/contact', label: 'Contact' },
+              { to: '/account', label: clientUser ? `Account (${accountLabel})` : 'Sign In / Sign Up' },
             ].map((item) => (
               <Link
                 key={item.to}
@@ -140,6 +147,7 @@ export function PublicLayout({ children }: { children: React.ReactNode }) {
                 <li><Link to="/terms" className="hover:text-white transition-colors">Terms &amp; Conditions</Link></li>
                 <li><Link to="/cancellation-policy" className="hover:text-white transition-colors">Cancellation &amp; Refunds</Link></li>
                 <li><Link to="/booking" className="hover:text-white transition-colors">Request a Booking</Link></li>
+                <li><Link to="/account" className="hover:text-white transition-colors">Traveller Sign In</Link></li>
                 <li><Link to="/admin" className="text-[#80d5cb] hover:text-white transition-colors">Admin Portal</Link></li>
               </ul>
             </div>
