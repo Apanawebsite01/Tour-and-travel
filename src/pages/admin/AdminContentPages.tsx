@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { Check, Download, Plus, Trash2, Upload } from 'lucide-react';
+import { Check, Download, Lock, Plus, Trash2, Upload } from 'lucide-react';
 import { AdminLayout } from '../../components/layout/AdminLayout';
 import { SafeImage } from '../../components/ui/SafeImage';
 import { StatusBadge } from '../../components/ui/StatusBadge';
@@ -188,23 +188,65 @@ export function AdminReviewsPage() {
 // 3. WEBSITE CONTENT MANAGEMENT
 // ==========================================
 export function AdminWebsitePage() {
-  const { adminFetch } = useAuth();
+  const { admin, adminFetch, setSession } = useAuth();
   const { refresh: refreshPublic } = useSite();
   const [settings, setSettings] = useState<SiteSettings | null>(null);
   const [faqs, setFaqs] = useState<FaqItem[]>([]);
   const [newFaqQ, setNewFaqQ] = useState('');
   const [newFaqA, setNewFaqA] = useState('');
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
+  const [adminName, setAdminName] = useState(admin?.full_name || 'TravelGo Admin');
+  const [adminEmail, setAdminEmail] = useState(admin?.email || 'admin@travelgo.in');
+  const [adminPassword, setAdminPassword] = useState('');
+  const [usingEnvPass, setUsingEnvPass] = useState(false);
+  const [credMsg, setCredMsg] = useState<string | null>(null);
+  const [credErr, setCredErr] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const [sRes, fRes] = await Promise.all([adminFetch('/api/admin/settings'), adminFetch('/api/admin/faqs')]);
+    const [sRes, fRes, meRes] = await Promise.all([
+      adminFetch('/api/admin/settings'),
+      adminFetch('/api/admin/faqs'),
+      adminFetch('/api/admin/auth/me'),
+    ]);
     if (sRes.ok) setSettings(await sRes.json());
     if (fRes.ok) setFaqs(await fRes.json());
+    if (meRes.ok) {
+      const meData = await meRes.json();
+      if (meData.admin?.full_name) setAdminName(meData.admin.full_name);
+      if (meData.admin?.email) setAdminEmail(meData.admin.email);
+      setUsingEnvPass(Boolean(meData.usingEnv));
+    }
   }, [adminFetch]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  const handleSaveCredentials = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCredMsg(null);
+    setCredErr(null);
+    const res = await adminFetch('/api/admin/auth/credentials', {
+      method: 'PUT',
+      body: JSON.stringify({
+        full_name: adminName,
+        email: adminEmail,
+        password: adminPassword,
+      }),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      setCredErr(json.error || 'Could not update admin credentials');
+      return;
+    }
+    setSession(json.token, json.admin);
+    setAdminPassword('');
+    setCredMsg(
+      json.usingEnv
+        ? 'Admin profile & database hash saved. Note: server ADMIN_PASSWORD environment variable still takes precedence while set.'
+        : 'Admin credentials saved.'
+    );
+  };
 
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -325,6 +367,58 @@ export function AdminWebsitePage() {
             </button>
           </form>
         </div>
+
+        {/* Admin Credentials */}
+        <form onSubmit={handleSaveCredentials} className="bg-white rounded-2xl border border-[#E2E8F0] p-6 space-y-4">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-2">
+              <Lock className="w-4 h-4 text-[#0F766E]" />
+              <h2 className="font-display text-lg font-bold">Admin Portal Credentials</h2>
+            </div>
+            {usingEnvPass && (
+              <span className="text-xs font-medium text-[#0F766E]">
+                Managed via ADMIN_PASSWORD secret
+              </span>
+            )}
+          </div>
+          {credMsg && <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-800">{credMsg}</div>}
+          {credErr && <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700">{credErr}</div>}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs font-semibold mb-1">Admin Name</label>
+              <input
+                required
+                value={adminName}
+                onChange={(e) => setAdminName(e.target.value)}
+                className="w-full h-10 px-3 rounded-xl border border-[#E2E8F0] text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1">Admin Email</label>
+              <input
+                type="email"
+                required
+                value={adminEmail}
+                onChange={(e) => setAdminEmail(e.target.value)}
+                className="w-full h-10 px-3 rounded-xl border border-[#E2E8F0] text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1">New Password (optional, min 8 chars)</label>
+              <input
+                type="password"
+                minLength={8}
+                value={adminPassword}
+                onChange={(e) => setAdminPassword(e.target.value)}
+                placeholder="Leave blank to keep current"
+                className="w-full h-10 px-3 rounded-xl border border-[#E2E8F0] text-sm"
+              />
+            </div>
+          </div>
+          <button type="submit" className="px-6 py-2.5 rounded-full bg-[#0F766E] text-white text-xs font-semibold">
+            Save Admin Credentials
+          </button>
+        </form>
       </div>
     </AdminLayout>
   );

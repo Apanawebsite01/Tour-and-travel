@@ -200,6 +200,49 @@ adminRouter.get('/auth/me', (req: AuthenticatedRequest, res) => {
       email: profile?.email || req.admin!.email,
       role: 'admin',
     },
+    usingEnv: Boolean(getEnvAdminPassword()),
+  });
+});
+
+const updateCredentialsSchema = z.object({
+  full_name: z.string().trim().min(2, 'Name must be at least 2 characters').max(100),
+  email: z.string().trim().email('Valid email is required'),
+  password: z.string().min(8, 'Password must be at least 8 characters').max(128).optional().or(z.literal('')),
+});
+
+adminRouter.put('/auth/credentials', (req: AuthenticatedRequest, res) => {
+  const parsed = updateCredentialsSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.issues[0]?.message || 'Invalid credentials payload' });
+    return;
+  }
+
+  const profile = getAdminProfile();
+  const id = profile?.id || req.admin!.sub;
+  const { full_name, email, password } = parsed.data;
+  const newHash = password ? hashPassword(password) : profile?.password_hash || null;
+
+  if (profile) {
+    db.prepare('UPDATE profiles SET full_name = ?, email = ?, password_hash = ? WHERE id = ?').run(
+      full_name,
+      email,
+      newHash,
+      id
+    );
+  } else {
+    db.prepare("INSERT INTO profiles (id, full_name, email, role, password_hash) VALUES (?, ?, ?, 'admin', ?)").run(
+      id,
+      full_name,
+      email,
+      newHash
+    );
+  }
+
+  const token = signAdminToken({ sub: id, email, role: 'admin' });
+  res.json({
+    token,
+    admin: { id, full_name, email, role: 'admin' },
+    usingEnv: Boolean(getEnvAdminPassword()),
   });
 });
 
