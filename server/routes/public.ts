@@ -2,7 +2,7 @@ import { Router } from 'express';
 import crypto from 'node:crypto';
 import { z } from 'zod';
 import { getStore, saveStore, upsertLocalUser, type VehicleRecord } from '../store.ts';
-import { adminAuth } from '../../src/lib/firebase-admin.ts';
+import { verifyFirebaseIdToken } from '../../src/lib/firebase-admin.ts';
 import { requireAuth, type FirebaseAuthRequest } from '../../src/middleware/auth.ts';
 
 export const publicRouter = Router();
@@ -231,7 +231,7 @@ publicRouter.post('/bookings', async (req, res) => {
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ')) {
     try {
-      const decoded = await adminAuth.verifyIdToken(authHeader.slice(7).trim());
+      const decoded = await verifyFirebaseIdToken(authHeader.slice(7).trim());
       userUid = decoded.uid;
       if (decoded.email) {
         upsertLocalUser(decoded.uid, decoded.email);

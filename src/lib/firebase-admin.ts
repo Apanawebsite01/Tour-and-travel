@@ -1,7 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { getApps, initializeApp } from 'firebase-admin/app';
-import { getAuth } from 'firebase-admin/auth';
+import type { DecodedIdToken } from 'firebase-admin/auth';
 
 function resolveFirebaseProjectId(): string {
   if (process.env.FIREBASE_PROJECT_ID) {
@@ -22,10 +21,15 @@ function resolveFirebaseProjectId(): string {
   return 'helical-ace-lc62s';
 }
 
-if (!getApps().length) {
-  initializeApp({
-    projectId: resolveFirebaseProjectId(),
-  });
+export async function verifyFirebaseIdToken(token: string): Promise<DecodedIdToken> {
+  const [{ getApps, initializeApp }, { getAuth }] = await Promise.all([
+    import('firebase-admin/app'),
+    import('firebase-admin/auth'),
+  ]);
+  if (!getApps().length) {
+    initializeApp({
+      projectId: resolveFirebaseProjectId(),
+    });
+  }
+  return getAuth().verifyIdToken(token);
 }
-
-export const adminAuth = getAuth();

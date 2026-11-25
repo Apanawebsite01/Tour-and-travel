@@ -1,4 +1,3 @@
-import 'dotenv/config';
 import express from 'express';
 import { seedDatabase } from './seed.ts';
 import { publicRouter } from './routes/public.ts';

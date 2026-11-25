@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import type { DecodedIdToken } from 'firebase-admin/auth';
-import { adminAuth } from '../lib/firebase-admin.ts';
+import { verifyFirebaseIdToken } from '../lib/firebase-admin.ts';
 import { upsertLocalUser } from '../../server/store.ts';
 
 export interface FirebaseAuthRequest extends Request {
@@ -20,7 +20,7 @@ export const requireAuth = async (
 
   const token = authHeader.slice(7).trim();
   try {
-    const decodedToken = await adminAuth.verifyIdToken(token);
+    const decodedToken = await verifyFirebaseIdToken(token);
     req.user = decodedToken;
     if (decodedToken.email) {
       upsertLocalUser(decodedToken.uid, decodedToken.email);
