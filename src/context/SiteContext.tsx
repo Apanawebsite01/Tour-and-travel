@@ -1,5 +1,13 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import type { FaqItem, GalleryItem, ReviewItem, SiteSettings, TourPackage, Vehicle } from '../types';
+import {
+  DEFAULT_FAQS,
+  DEFAULT_GALLERY,
+  DEFAULT_PACKAGES,
+  DEFAULT_REVIEWS,
+  DEFAULT_SETTINGS,
+  DEFAULT_VEHICLES,
+} from '../data/bundledAssets';
 
 interface SiteContextValue {
   settings: SiteSettings | null;
@@ -16,29 +24,32 @@ interface SiteContextValue {
 const SiteContext = createContext<SiteContextValue | undefined>(undefined);
 
 export function SiteProvider({ children }: { children: React.ReactNode }) {
-  const [settings, setSettings] = useState<SiteSettings | null>(null);
-  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
-  const [packages, setPackages] = useState<TourPackage[]>([]);
-  const [reviews, setReviews] = useState<ReviewItem[]>([]);
-  const [gallery, setGallery] = useState<GalleryItem[]>([]);
-  const [faqs, setFaqs] = useState<FaqItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [settings, setSettings] = useState<SiteSettings | null>(DEFAULT_SETTINGS);
+  const [vehicles, setVehicles] = useState<Vehicle[]>(DEFAULT_VEHICLES);
+  const [packages, setPackages] = useState<TourPackage[]>(DEFAULT_PACKAGES);
+  const [reviews, setReviews] = useState<ReviewItem[]>(DEFAULT_REVIEWS);
+  const [gallery, setGallery] = useState<GalleryItem[]>(DEFAULT_GALLERY);
+  const [faqs, setFaqs] = useState<FaqItem[]>(DEFAULT_FAQS);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
       setError(null);
       const res = await fetch('/api/public/bootstrap');
-      if (!res.ok) throw new Error('Unable to load TravelGo data');
+      const contentType = res.headers.get('content-type') || '';
+      if (!res.ok || !contentType.includes('application/json')) {
+        return;
+      }
       const data = await res.json();
-      setSettings(data.settings);
-      setVehicles(data.vehicles || []);
-      setPackages(data.packages || []);
-      setReviews(data.reviews || []);
-      setGallery(data.gallery || []);
-      setFaqs(data.faqs || []);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load');
+      if (data.settings) setSettings(data.settings);
+      if (Array.isArray(data.vehicles) && data.vehicles.length > 0) setVehicles(data.vehicles);
+      if (Array.isArray(data.packages) && data.packages.length > 0) setPackages(data.packages);
+      if (Array.isArray(data.reviews)) setReviews(data.reviews);
+      if (Array.isArray(data.gallery)) setGallery(data.gallery);
+      if (Array.isArray(data.faqs)) setFaqs(data.faqs);
+    } catch {
+      // Keep bundled catalog data if backend endpoint is unavailable
     } finally {
       setLoading(false);
     }

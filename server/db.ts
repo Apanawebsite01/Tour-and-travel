@@ -1,12 +1,8 @@
 import { DatabaseSync } from 'node:sqlite';
-import fs from 'node:fs';
 import path from 'node:path';
+import { getDataDir } from './paths.ts';
 
-const dataDir = path.resolve(process.cwd(), 'data');
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
-}
-
+const dataDir = getDataDir();
 const dbPath = path.join(dataDir, 'travelgo.sqlite');
 export const db = new DatabaseSync(dbPath);
 

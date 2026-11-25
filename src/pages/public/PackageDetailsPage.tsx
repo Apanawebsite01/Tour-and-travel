@@ -6,8 +6,11 @@ import { SafeImage } from '../../components/ui/SafeImage';
 import { formatINR } from '../../utils/format';
 import type { TourPackage } from '../../types';
 
+import { useSite } from '../../context/SiteContext';
+
 export function PackageDetailsPage() {
   const { id } = useParams<{ id: string }>();
+  const { packages, vehicles } = useSite();
   const [pkg, setPkg] = useState<TourPackage | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -15,20 +18,39 @@ export function PackageDetailsPage() {
     let mounted = true;
     setLoading(true);
     fetch(`/api/public/packages/${id}`)
-      .then((res) => (res.ok ? res.json() : null))
+      .then((res) => {
+        const ct = res.headers.get('content-type') || '';
+        return res.ok && ct.includes('application/json') ? res.json() : null;
+      })
       .then((data) => {
         if (mounted) {
-          setPkg(data);
+          if (data) {
+            setPkg(data);
+          } else {
+            const fallbackPkg = packages.find((p) => p.id === id) || null;
+            setPkg(
+              fallbackPkg
+                ? {
+                    ...fallbackPkg,
+                    suggested_vehicle: vehicles.find((v) => v.id === fallbackPkg.suggested_vehicle_id) || null,
+                  }
+                : null
+            );
+          }
           setLoading(false);
         }
       })
       .catch(() => {
-        if (mounted) setLoading(false);
+        if (mounted) {
+          const fallbackPkg = packages.find((p) => p.id === id) || null;
+          setPkg(fallbackPkg);
+          setLoading(false);
+        }
       });
     return () => {
       mounted = false;
     };
-  }, [id]);
+  }, [id, packages, vehicles]);
 
   if (loading) {
     return (

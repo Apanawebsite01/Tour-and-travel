@@ -1,32 +1,9 @@
-import 'dotenv/config';
 import express from 'express';
 import path from 'node:path';
-import fs from 'node:fs';
-import { initSchema } from './server/db.ts';
-import { seedDatabase } from './server/seed.ts';
-import { publicRouter } from './server/routes/public.ts';
-import { adminRouter } from './server/routes/admin.ts';
+import { createApiApp } from './server/app.ts';
 
 async function startServer() {
-  initSchema();
-  seedDatabase();
-
-  const app = express();
-  app.set('trust proxy', 1);
-  app.use(express.json({ limit: '10mb' }));
-
-  const uploadsDir = path.resolve(process.cwd(), 'uploads');
-  if (!fs.existsSync(uploadsDir)) {
-    fs.mkdirSync(uploadsDir, { recursive: true });
-  }
-  app.use('/uploads', express.static(uploadsDir));
-
-  app.use('/api/public', publicRouter);
-  app.use('/api/admin', adminRouter);
-
-  app.get('/api/health', (_req, res) => {
-    res.json({ ok: true, timestamp: new Date().toISOString() });
-  });
+  const app = createApiApp();
 
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');

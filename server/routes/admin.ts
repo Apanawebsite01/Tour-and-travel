@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import { db } from '../db.ts';
+import { getUploadsDir } from '../paths.ts';
 import {
   AuthenticatedRequest,
   constantTimeEqualStr,
@@ -205,10 +206,7 @@ adminRouter.get('/auth/me', (req: AuthenticatedRequest, res) => {
 // ==========================================
 // SECURE IMAGE UPLOAD
 // ==========================================
-const uploadsDir = path.resolve(process.cwd(), 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
+const uploadsDir = getUploadsDir();
 
 const uploadSchema = z.object({
   filename: z.string().min(1).max(200),

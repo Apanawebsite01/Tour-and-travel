@@ -7,8 +7,11 @@ import { StatusBadge } from '../../components/ui/StatusBadge';
 import { formatINR } from '../../utils/format';
 import type { Vehicle } from '../../types';
 
+import { useSite } from '../../context/SiteContext';
+
 export function VehicleDetailsPage() {
   const { id } = useParams<{ id: string }>();
+  const { vehicles } = useSite();
   const [vehicle, setVehicle] = useState<Vehicle | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeImg, setActiveImg] = useState(0);
@@ -19,23 +22,30 @@ export function VehicleDetailsPage() {
     let mounted = true;
     setLoading(true);
     fetch(`/api/public/vehicles/${id}`)
-      .then((res) => (res.ok ? res.json() : null))
+      .then((res) => {
+        const ct = res.headers.get('content-type') || '';
+        return res.ok && ct.includes('application/json') ? res.json() : null;
+      })
       .then((data) => {
         if (mounted) {
-          setVehicle(data);
-          if (data && !data.driver_available && data.self_drive_available) {
+          const resolved = data || vehicles.find((v) => v.id === id) || null;
+          setVehicle(resolved);
+          if (resolved && !resolved.driver_available && resolved.self_drive_available) {
             setEstMode('Self-Drive');
           }
           setLoading(false);
         }
       })
       .catch(() => {
-        if (mounted) setLoading(false);
+        if (mounted) {
+          setVehicle(vehicles.find((v) => v.id === id) || null);
+          setLoading(false);
+        }
       });
     return () => {
       mounted = false;
     };
-  }, [id]);
+  }, [id, vehicles]);
 
   if (loading) {
     return (
